@@ -30,6 +30,13 @@ pub struct TrackParams {
     pub pattern_hits: Shared,
     /// Pattern rotation, [0.0, 15.0].
     pub pattern_rotation: Shared,
+    /// Per-track LFO rate in Hz (0.01..20).
+    pub lfo_rate: Shared,
+    /// LFO depth [0..1]. Depth 0 = LFO off regardless of target.
+    pub lfo_depth: Shared,
+    /// LFO target index (quantised):
+    ///   0 OFF · 1 CUT · 2 GAIN · 3 FREQ · 4 REV
+    pub lfo_target: Shared,
 }
 
 impl TrackParams {
@@ -50,6 +57,9 @@ impl TrackParams {
             pattern_bits: Arc::new(AtomicU32::new(rhythm::euclidean_bits(4, 0))),
             pattern_hits: shared(4.0),
             pattern_rotation: shared(0.0),
+            lfo_rate: shared(0.5),
+            lfo_depth: shared(0.0),
+            lfo_target: shared(1.0), // CUT by default (only audible when depth > 0)
         }
     }
 
@@ -78,6 +88,9 @@ impl TrackParams {
             pattern_bits: self.pattern_bits.load(std::sync::atomic::Ordering::Relaxed),
             pattern_hits: self.pattern_hits.value(),
             pattern_rotation: self.pattern_rotation.value(),
+            lfo_rate: self.lfo_rate.value(),
+            lfo_depth: self.lfo_depth.value(),
+            lfo_target: self.lfo_target.value(),
             muted: self.mute.value() > 0.5,
         }
     }
@@ -98,6 +111,9 @@ pub struct TrackSnapshot {
     pub pattern_bits: u32,
     pub pattern_hits: f32,
     pub pattern_rotation: f32,
+    pub lfo_rate: f32,
+    pub lfo_depth: f32,
+    pub lfo_target: f32,
     pub muted: bool,
 }
 

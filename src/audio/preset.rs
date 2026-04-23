@@ -134,10 +134,84 @@ impl Preset {
     }
 }
 
+// ── LFO targets ─────────────────────────────────────────────────────────
+
+pub const LFO_OFF: u32 = 0;
+pub const LFO_CUTOFF: u32 = 1;
+pub const LFO_GAIN: u32 = 2;
+pub const LFO_FREQ: u32 = 3;
+pub const LFO_REVERB: u32 = 4;
+pub const LFO_TARGETS: u32 = 5;
+
+pub fn lfo_target_name(idx: u32) -> &'static str {
+    match idx {
+        LFO_OFF => "OFF",
+        LFO_CUTOFF => "CUT",
+        LFO_GAIN => "GAIN",
+        LFO_FREQ => "FREQ",
+        LFO_REVERB => "REV",
+        _ => "?",
+    }
+}
+
+/// Lightweight bundle of the three Shared atomics that drive a track's
+/// per-voice LFO. Clone is ~3× Arc-clone (refcount bumps) — cheap.
+#[derive(Clone)]
+pub struct LfoBundle {
+    pub rate: Shared,
+    pub depth: Shared,
+    pub target: Shared,
+}
+
+impl LfoBundle {
+    pub fn from_params(p: &TrackParams) -> Self {
+        Self {
+            rate: p.lfo_rate.clone(),
+            depth: p.lfo_depth.clone(),
+            target: p.lfo_target.clone(),
+        }
+    }
+
+    /// Apply this LFO to `base` only if `this_target` matches the user
+    /// selection *and* depth is audible. Otherwise `base` is returned
+    /// unchanged — the LFO adds zero cost when it's off.
+    #[inline]
+    pub fn apply(
+        &self,
+        base: f64,
+        this_target: u32,
+        t: f64,
+        scaler: impl Fn(f64, f64) -> f64,
+    ) -> f64 {
+        let tgt = self.target.value().round() as u32;
+        if tgt != this_target {
+            return base;
+        }
+        let depth = self.depth.value() as f64;
+        if depth < 1.0e-4 {
+            return base;
+        }
+        let rate = self.rate.value() as f64;
+        let lv = (std::f64::consts::TAU * rate * t).sin();
+        scaler(base, lv * depth)
+    }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn stereo_from_shared(s: Shared) -> Net {
     Net::wrap(Box::new(lfo(move |_t: f64| s.value() as f64) >> split::<U2>()))
+}
+
+/// Reverb-mix signal that respects LFO when target = REV.
+/// Additive ±0.4 at depth=1, clamped to [0, 1].
+fn stereo_reverb_mix(base: Shared, lb: LfoBundle) -> Net {
+    let mono = lfo(move |t: f64| {
+        let v = base.value() as f64;
+        lb.apply(v, LFO_REVERB, t, |b, m| (b + m * 0.4).clamp(0.0, 1.0))
+    });
+    Net::wrap(Box::new(mono >> split::<U2>()))
 }
 
 fn supermass_send(amount: Shared) -> Net {
@@ -164,19 +238,18 @@ fn stereo_gate_voiced(
     pulse_depth: Shared,
     bpm: Shared,
     life_mod: Shared,
+    lb: LfoBundle,
 ) -> Net {
     let raw = lfo(move |t: f64| {
-        let g = (gain.value() * (1.0 - mute.value())) as f64;
+        let g_raw = (gain.value() * (1.0 - mute.value())) as f64;
+        // Tremolo — ±60 % at depth=1, additive around base.
+        let g = lb.apply(g_raw, LFO_GAIN, t, |b, m| (b * (1.0 + m * 0.6)).max(0.0));
         let depth = pulse_depth.value().clamp(0.0, 1.0) as f64;
         let pulse = pulse_sine(t, bpm.value() as f64);
-        // Life mod: empty row → 0.4×, full row → 1.3× (continuous audio
-        // feedback so the blocks on the grid correspond to swelling /
-        // fading track energy). Smoothed by `follow(0.4)` below.
         let life = life_mod.value().clamp(0.0, 1.0) as f64;
         let life_scaled = 0.4 + 0.9 * life;
         g * (1.0 - depth + depth * pulse) * life_scaled
     });
-    // 400 ms smoothing so beat-edge life_mod updates don't click.
     Net::wrap(Box::new(raw >> follow(0.4) >> split::<U2>()))
 }
 
@@ -186,22 +259,43 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
     let res_s = p.resonance.clone();
     let det = p.detune.clone();
 
+    let lb = LfoBundle::from_params(p);
     let f0 = p.freq.clone();
     let f1 = p.freq.clone();
     let f2 = p.freq.clone();
     let f3 = p.freq.clone();
     let d1 = det.clone();
     let d2 = det.clone();
+    let (lb0, lb1, lb2, lb3, lb_c) = (
+        lb.clone(),
+        lb.clone(),
+        lb.clone(),
+        lb.clone(),
+        lb.clone(),
+    );
 
-    let osc = ((lfo(move |_t: f64| f0.value() as f64) >> (sine() * 0.30))
-        + (lfo(move |_t: f64| f1.value() as f64 * 1.501 * (1.0 + d1.value() as f64 * 0.000578)) >> (sine() * 0.20))
-        + (lfo(move |_t: f64| f2.value() as f64 * 2.013 * (1.0 + d2.value() as f64 * 0.000578)) >> (sine() * 0.14))
-        + (lfo(move |_t: f64| f3.value() as f64 * 3.007) >> (sine() * 0.08)))
+    let osc = ((lfo(move |t: f64| {
+            let b = f0.value() as f64;
+            lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.30))
+        + (lfo(move |t: f64| {
+            let b = f1.value() as f64 * 1.501 * (1.0 + d1.value() as f64 * 0.000578);
+            lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.20))
+        + (lfo(move |t: f64| {
+            let b = f2.value() as f64 * 2.013 * (1.0 + d2.value() as f64 * 0.000578);
+            lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.14))
+        + (lfo(move |t: f64| {
+            let b = f3.value() as f64 * 3.007;
+            lb3.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.08)))
         * 0.9;
 
     let cutoff_mod = lfo(move |t: f64| {
         let wobble = 1.0 + 0.10 * (0.5 - 0.5 * (t * 0.08).sin());
-        cut.value() as f64 * wobble
+        let base = cut.value() as f64 * wobble;
+        lb_c.apply(base, LFO_CUTOFF, t, |b, m| b * 2.0_f64.powf(m))
     }) >> follow(0.08);
     // Hard cap at 0.65: above that the Moog self-oscillates into a
     // sustained whistle at cutoff. We'd rather lose a tiny bit of range
@@ -220,7 +314,7 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         >> reverb_stereo(18.0, 4.0, 0.9);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
-    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -228,20 +322,33 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             p.pulse_depth.clone(),
             g.bpm.clone(),
             p.life_mod.clone(),
+            lb,
         )
 }
 
 // ── Drone ──
 fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
+    let lb = LfoBundle::from_params(p);
     let cut = p.cutoff.clone();
     let res_s = p.resonance.clone();
 
     let f0 = p.freq.clone();
     let f1 = p.freq.clone();
-    let sub = (lfo(move |_t: f64| f0.value() as f64 * 0.5) >> (sine() * 0.45))
-        + (lfo(move |_t: f64| f1.value() as f64) >> (sine() * 0.12));
+    let (lb0, lb1, lb_c) = (lb.clone(), lb.clone(), lb.clone());
 
-    let noise_cut = lfo(move |_t: f64| cut.value().clamp(40.0, 300.0) as f64) >> follow(0.08);
+    let sub = (lfo(move |t: f64| {
+            let b = f0.value() as f64 * 0.5;
+            lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.45))
+        + (lfo(move |t: f64| {
+            let b = f1.value() as f64;
+            lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.12));
+
+    let noise_cut = lfo(move |t: f64| {
+        let b = cut.value().clamp(40.0, 300.0) as f64;
+        lb_c.apply(b, LFO_CUTOFF, t, |b, m| b * 2.0_f64.powf(m))
+    }) >> follow(0.08);
     let noise_q = lfo(move |_t: f64| res_s.value() as f64) >> follow(0.08);
     let noise = (brown() | noise_cut | noise_q) >> moog();
     let noise_body = noise * 0.28;
@@ -253,7 +360,7 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
     let stereo = body >> split::<U2>() >> reverb_stereo(20.0, 5.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
-    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -261,24 +368,36 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
             p.pulse_depth.clone(),
             g.bpm.clone(),
             p.life_mod.clone(),
+            lb,
         )
 }
 
 // ── Shimmer ──
 fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
+    let lb = LfoBundle::from_params(p);
     let f0 = p.freq.clone();
     let f1 = p.freq.clone();
     let f2 = p.freq.clone();
+    let (lb0, lb1, lb2) = (lb.clone(), lb.clone(), lb.clone());
 
-    let osc = (lfo(move |_t: f64| f0.value() as f64 * 2.0) >> (sine() * 0.18))
-        + (lfo(move |_t: f64| f1.value() as f64 * 3.0) >> (sine() * 0.12))
-        + (lfo(move |_t: f64| f2.value() as f64 * 4.007) >> (sine() * 0.08));
+    let osc = (lfo(move |t: f64| {
+            let b = f0.value() as f64 * 2.0;
+            lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.18))
+        + (lfo(move |t: f64| {
+            let b = f1.value() as f64 * 3.0;
+            lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.12))
+        + (lfo(move |t: f64| {
+            let b = f2.value() as f64 * 4.007;
+            lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (sine() * 0.08));
 
     let bright = osc >> highpass_hz(400.0, 0.5);
     let stereo = bright >> split::<U2>() >> reverb_stereo(22.0, 6.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
-    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -286,6 +405,7 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             p.pulse_depth.clone(),
             g.bpm.clone(),
             p.life_mod.clone(),
+            lb,
         )
 }
 
@@ -365,8 +485,9 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
 
     let stereo = kick >> split::<U2>() >> reverb_stereo(10.0, 1.5, 0.88);
 
+    let lb = LfoBundle::from_params(p);
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
-    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -374,6 +495,7 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
             p.pulse_depth.clone(),
             g.bpm.clone(),
             p.life_mod.clone(),
+            lb,
         )
 }
 
@@ -381,24 +503,35 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
 // Fundamental + 2nd harmonic + sub, Moog-lowpassed; groove envelope
 // pumps amplitude on every beat so the bass pulses instead of droning.
 fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
+    let lb = LfoBundle::from_params(p);
     let f1 = p.freq.clone();
     let f2 = p.freq.clone();
     let f3 = p.freq.clone();
     let cut = p.cutoff.clone();
     let res_s = p.resonance.clone();
+    let (lb1, lb2, lb3, lb_c) = (lb.clone(), lb.clone(), lb.clone(), lb.clone());
 
-    let fundamental = lfo(move |_t: f64| f1.value() as f64) >> (sine() * 0.55);
-    let second = lfo(move |_t: f64| f2.value() as f64 * 2.0) >> (sine() * 0.22);
-    let sub = lfo(move |_t: f64| f3.value() as f64 * 0.5) >> (sine() * 0.35);
+    let fundamental = lfo(move |t: f64| {
+        let b = f1.value() as f64;
+        lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }) >> (sine() * 0.55);
+    let second = lfo(move |t: f64| {
+        let b = f2.value() as f64 * 2.0;
+        lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }) >> (sine() * 0.22);
+    let sub = lfo(move |t: f64| {
+        let b = f3.value() as f64 * 0.5;
+        lb3.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }) >> (sine() * 0.35);
     let osc = fundamental + second + sub;
 
-    // Moog with cutoff hard-capped at 900 Hz — keeps the voice in bass
-    // territory no matter what the slider says.
-    let cut_mod = lfo(move |_t: f64| cut.value().min(900.0) as f64) >> follow(0.08);
+    let cut_mod = lfo(move |t: f64| {
+        let b = cut.value().min(900.0) as f64;
+        lb_c.apply(b, LFO_CUTOFF, t, |b, m| b * 2.0_f64.powf(m))
+    }) >> follow(0.08);
     let res_mod = lfo(move |_t: f64| res_s.value().min(0.65) as f64) >> follow(0.08);
     let filtered = (osc | cut_mod | res_mod) >> moog();
 
-    // Groove — loud on the beat (1.0), soft between (0.45).
     let bpm_groove = g.bpm.clone();
     let groove = lfo(move |t: f64| {
         let pump = pulse_decay(t, bpm_groove.value() as f64, 3.5);
@@ -409,7 +542,7 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
     let stereo = grooved >> split::<U2>() >> reverb_stereo(14.0, 2.5, 0.88);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
-    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -417,5 +550,6 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
             p.pulse_depth.clone(),
             g.bpm.clone(),
             p.life_mod.clone(),
+            lb,
         )
 }

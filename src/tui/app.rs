@@ -597,7 +597,7 @@ fn handle_params_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
     let Some(track) = tracks.get(app.selected_track) else {
         return;
     };
-    let n_params = 8;
+    let n_params = 11;
 
     match key.code {
         KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => app.focus = Focus::Tracks,
@@ -679,6 +679,20 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
         5 => p.reverb_mix.set_value((p.reverb_mix.value() + 0.05 * sign).clamp(0.0, 1.0)),
         6 => p.supermass.set_value((p.supermass.value() + 0.1 * sign).clamp(0.0, 1.0)),
         7 => p.pulse_depth.set_value((p.pulse_depth.value() + 0.05 * sign).clamp(0.0, 1.0)),
+        // LFO rate — exponential ×1.18 per tap (smooth from 0.01 Hz → 20 Hz).
+        8 => {
+            let factor = if sign > 0.0 { 1.18 } else { 1.0 / 1.18 };
+            let v = (p.lfo_rate.value() * factor).clamp(0.01, 20.0);
+            p.lfo_rate.set_value(v);
+        }
+        9 => p.lfo_depth.set_value((p.lfo_depth.value() + 0.05 * sign).clamp(0.0, 1.0)),
+        10 => {
+            // Cycle through targets 0..LFO_TARGETS, wrapping both directions.
+            let n = crate::audio::preset::LFO_TARGETS as i32;
+            let cur = p.lfo_target.value().round() as i32;
+            let next = (cur + sign as i32).rem_euclid(n);
+            p.lfo_target.set_value(next as f32);
+        }
         _ => {}
     }
 }

@@ -46,7 +46,20 @@ pub struct TrackPreset {
     pub pattern_hits: f32,
     #[serde(default)]
     pub pattern_rotation: f32,
+    #[serde(default = "default_lfo_rate")]
+    pub lfo_rate: f32,
+    #[serde(default)]
+    pub lfo_depth: f32,
+    #[serde(default = "default_lfo_target")]
+    pub lfo_target: f32,
     pub mute: bool,
+}
+
+fn default_lfo_rate() -> f32 {
+    0.5
+}
+fn default_lfo_target() -> f32 {
+    1.0
 }
 
 fn default_hits() -> f32 {
@@ -83,6 +96,9 @@ pub fn save(dir: &Path, engine: &EngineHandle) -> Result<PathBuf> {
                     pulse_depth: s.pulse_depth,
                     pattern_hits: s.pattern_hits,
                     pattern_rotation: s.pattern_rotation,
+                    lfo_rate: s.lfo_rate,
+                    lfo_depth: s.lfo_depth,
+                    lfo_target: s.lfo_target,
                     mute: s.muted,
                 }
             })
@@ -127,6 +143,9 @@ pub fn load(path: &Path, engine: &EngineHandle) -> Result<usize> {
         p.pattern_hits.set_value(snap.pattern_hits.clamp(0.0, 16.0));
         p.pattern_rotation
             .set_value(snap.pattern_rotation.rem_euclid(16.0));
+        p.lfo_rate.set_value(snap.lfo_rate.clamp(0.01, 20.0));
+        p.lfo_depth.set_value(snap.lfo_depth.clamp(0.0, 1.0));
+        p.lfo_target.set_value(snap.lfo_target.clamp(0.0, 4.0));
         p.mute.set_value(if snap.mute { 1.0 } else { 0.0 });
         applied += 1;
     }

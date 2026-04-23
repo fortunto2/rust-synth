@@ -35,11 +35,11 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1); 12])
+        .constraints([Constraint::Length(1); 13])
         .split(inner);
 
     let lfo_target_idx = (s.lfo_target.round() as u32) % LFO_TARGETS;
-    let items: [(&str, f32, String); 12] = [
+    let items: [(&str, f32, String); 13] = [
         ("gain    ", s.gain,                              format!("{:>4.2}", s.gain)),
         ("cutoff  ", norm_log(s.cutoff, 40.0, 12000.0),   format!("{:>5.0} Hz", s.cutoff)),
         ("resonance", (s.resonance / 0.70).min(1.0),      format!("{:>4.2}", s.resonance)),
@@ -53,6 +53,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         ("lfo tgt ", (lfo_target_idx as f32) / (LFO_TARGETS - 1) as f32,
                                                           lfo_target_name(lfo_target_idx).to_string()),
         ("character", s.character,                        format!("{:>4.2}", s.character)),
+        ("arp     ", s.arp,                               format!("{:>4.2}", s.arp)),
     ];
 
     for (i, ((name, v, label), row)) in items.iter().zip(rows.iter()).enumerate() {

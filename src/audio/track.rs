@@ -42,6 +42,10 @@ pub struct TrackParams {
     /// Heartbeat scales the pitch drop, etc. Default 0.5 reproduces the
     /// original hand-tuned formula; 0 and 1 are the two extremes.
     pub character: Shared,
+    /// Arpeggiator depth [0..1]. 0 → pitch stays on `freq`.
+    /// Above 0, every 2 beats the pitch jumps to a pentatonic-scale note
+    /// (glided via follow() so it sounds like portamento, not steps).
+    pub arp: Shared,
 }
 
 impl TrackParams {
@@ -66,6 +70,7 @@ impl TrackParams {
             lfo_depth: shared(0.0),
             lfo_target: shared(1.0), // CUT by default (only audible when depth > 0)
             character: shared(0.5),  // neutral — reproduces the hand-tuned formula
+            arp: shared(0.0),        // static pitch by default
         }
     }
 
@@ -98,6 +103,7 @@ impl TrackParams {
             lfo_depth: self.lfo_depth.value(),
             lfo_target: self.lfo_target.value(),
             character: self.character.value(),
+            arp: self.arp.value(),
             muted: self.mute.value() > 0.5,
         }
     }
@@ -122,6 +128,7 @@ pub struct TrackSnapshot {
     pub lfo_depth: f32,
     pub lfo_target: f32,
     pub character: f32,
+    pub arp: f32,
     pub muted: bool,
 }
 

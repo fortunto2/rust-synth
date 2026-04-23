@@ -54,6 +54,8 @@ pub struct TrackPreset {
     pub lfo_target: f32,
     #[serde(default = "default_character")]
     pub character: f32,
+    #[serde(default)]
+    pub arp: f32,
     pub mute: bool,
 }
 
@@ -105,6 +107,7 @@ pub fn save(dir: &Path, engine: &EngineHandle) -> Result<PathBuf> {
                     lfo_depth: s.lfo_depth,
                     lfo_target: s.lfo_target,
                     character: s.character,
+                    arp: s.arp,
                     mute: s.muted,
                 }
             })
@@ -153,6 +156,7 @@ pub fn load(path: &Path, engine: &EngineHandle) -> Result<usize> {
         p.lfo_depth.set_value(snap.lfo_depth.clamp(0.0, 1.0));
         p.lfo_target.set_value(snap.lfo_target.clamp(0.0, 4.0));
         p.character.set_value(snap.character.clamp(0.0, 1.0));
+        p.arp.set_value(snap.arp.clamp(0.0, 1.0));
         p.mute.set_value(if snap.mute { 1.0 } else { 0.0 });
         applied += 1;
     }

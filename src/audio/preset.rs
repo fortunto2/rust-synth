@@ -10,7 +10,7 @@ use fundsp::hacker::*;
 use std::sync::atomic::Ordering;
 
 use super::track::TrackParams;
-use crate::math::pulse::{pulse_decay, pulse_sine};
+use crate::math::pulse::{arp_offset_semitones, pulse_decay, pulse_sine};
 use crate::math::rhythm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,6 +248,38 @@ pub fn lerp3(a: f64, b: f64, d: f64, c: f64) -> f64 {
     }
 }
 
+/// Shared bundle of everything a freq-generating closure needs to apply
+/// arp + LFO on top of a base pitch. Cloning it is just a handful of
+/// Arc refcount bumps.
+#[derive(Clone)]
+pub struct FreqMod {
+    pub arp: Shared,
+    pub bpm: Shared,
+    pub lb: LfoBundle,
+}
+
+impl FreqMod {
+    pub fn new(p: &TrackParams, g: &GlobalParams) -> Self {
+        Self {
+            arp: p.arp.clone(),
+            bpm: g.bpm.clone(),
+            lb: LfoBundle::from_params(p),
+        }
+    }
+
+    /// Apply arpeggiator (scale-snapped pitch walk) and LFO-FREQ to a
+    /// base frequency. `seed` should be stable per track — we hash
+    /// `base` so different tracks naturally play different arp sequences.
+    #[inline]
+    pub fn apply(&self, base: f64, t: f64) -> f64 {
+        let seed = (base.max(1.0).ln() * 1_000.0) as u64;
+        let off = arp_offset_semitones(t, self.bpm.value() as f64, self.arp.value() as f64, seed);
+        let arped = base * 2.0_f64.powf(off / 12.0);
+        self.lb
+            .apply(arped, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }
+}
+
 /// Reverb-mix signal that respects LFO when target = REV.
 /// Additive ±0.4 at depth=1, clamped to [0, 1].
 fn stereo_reverb_mix(base: Shared, lb: LfoBundle) -> Net {
@@ -325,28 +357,32 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
     let char0 = p.character.clone();
     let char1 = p.character.clone();
     let char2 = p.character.clone();
-    let osc = ((lfo(move |t: f64| {
-            let b = f0.value() as f64;
-            lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.30))
+    let fm = FreqMod::new(p, g);
+    let fm0 = fm.clone();
+    let fm1 = fm.clone();
+    let fm2 = fm.clone();
+    let fm3 = fm.clone();
+    let _ = (lb0, lb1, lb2, lb3); // consumed via fm.* now
+    let osc = ((lfo(move |t: f64| fm0.apply(f0.value() as f64, t)) >> follow(0.08)
+            >> (sine() * 0.30))
         + (lfo(move |t: f64| {
             let c = char0.value() as f64;
             let r = 1.0 + lerp3(1.0, 0.501, 0.618, c);
             let b = f1.value() as f64 * r * (1.0 + d1.value() as f64 * 0.000578);
-            lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.20))
+            fm1.apply(b, t)
+        }) >> follow(0.08) >> (sine() * 0.20))
         + (lfo(move |t: f64| {
             let c = char1.value() as f64;
             let r = 2.0 + lerp3(0.0, 0.013, 0.414, c);
             let b = f2.value() as f64 * r * (1.0 + d2.value() as f64 * 0.000578);
-            lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.14))
+            fm2.apply(b, t)
+        }) >> follow(0.08) >> (sine() * 0.14))
         + (lfo(move |t: f64| {
             let c = char2.value() as f64;
             let r = 3.0 + lerp3(0.0, 0.007, 0.739, c);
             let b = f3.value() as f64 * r;
-            lb3.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.08)))
+            fm3.apply(b, t)
+        }) >> follow(0.08) >> (sine() * 0.08)))
         * 0.9;
 
     let cutoff_mod = lfo(move |t: f64| {
@@ -393,14 +429,14 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
     let f1 = p.freq.clone();
     let (lb0, lb1, lb_c) = (lb.clone(), lb.clone(), lb.clone());
 
-    let sub = (lfo(move |t: f64| {
-            let b = f0.value() as f64 * 0.5;
-            lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.45))
-        + (lfo(move |t: f64| {
-            let b = f1.value() as f64;
-            lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.12));
+    let fm = FreqMod::new(p, g);
+    let fm0 = fm.clone();
+    let fm1 = fm.clone();
+    let _ = (lb0, lb1);
+    let sub = (lfo(move |t: f64| fm0.apply(f0.value() as f64 * 0.5, t))
+            >> follow(0.08) >> (sine() * 0.45))
+        + (lfo(move |t: f64| fm1.apply(f1.value() as f64, t))
+            >> follow(0.08) >> (sine() * 0.12));
 
     let noise_cut = lfo(move |t: f64| {
         let b = cut.value().clamp(40.0, 300.0) as f64;
@@ -444,24 +480,26 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
     let char_s1 = p.character.clone();
     let char_s2 = p.character.clone();
     let char_s3 = p.character.clone();
+    let fm = FreqMod::new(p, g);
+    let fm0 = fm.clone();
+    let fm1 = fm.clone();
+    let fm2 = fm.clone();
+    let _ = (lb0, lb1, lb2);
     let osc = (lfo(move |t: f64| {
             let c = char_s1.value() as f64;
             let r = lerp3(2.0, 2.0, 2.1, c);
-            let b = f0.value() as f64 * r;
-            lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.18))
+            fm0.apply(f0.value() as f64 * r, t)
+        }) >> follow(0.08) >> (sine() * 0.18))
         + (lfo(move |t: f64| {
             let c = char_s2.value() as f64;
             let r = lerp3(3.0, 3.0, 3.3, c);
-            let b = f1.value() as f64 * r;
-            lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.12))
+            fm1.apply(f1.value() as f64 * r, t)
+        }) >> follow(0.08) >> (sine() * 0.12))
         + (lfo(move |t: f64| {
             let c = char_s3.value() as f64;
             let r = lerp3(4.0, 4.007, 4.8, c);
-            let b = f2.value() as f64 * r;
-            lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (sine() * 0.08));
+            fm2.apply(f2.value() as f64 * r, t)
+        }) >> follow(0.08) >> (sine() * 0.08));
 
     let bright = osc >> highpass_hz(400.0, 0.5);
     let stereo = bright >> split::<U2>() >> reverb_stereo(22.0, 6.0, 0.85);
@@ -581,18 +619,15 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
     let res_s = p.resonance.clone();
     let (lb1, lb2, lb3, lb_c) = (lb.clone(), lb.clone(), lb.clone(), lb.clone());
 
-    let fundamental = lfo(move |t: f64| {
-        let b = f1.value() as f64;
-        lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    }) >> (sine() * 0.55);
-    let second = lfo(move |t: f64| {
-        let b = f2.value() as f64 * 2.0;
-        lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    }) >> (sine() * 0.22);
-    let sub = lfo(move |t: f64| {
-        let b = f3.value() as f64 * 0.5;
-        lb3.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    }) >> (sine() * 0.35);
+    let fm = FreqMod::new(p, g);
+    let (fm1_, fm2_, fm3_) = (fm.clone(), fm.clone(), fm.clone());
+    let _ = (lb1, lb2, lb3);
+    let fundamental = lfo(move |t: f64| fm1_.apply(f1.value() as f64, t))
+        >> follow(0.08) >> (sine() * 0.55);
+    let second = lfo(move |t: f64| fm2_.apply(f2.value() as f64 * 2.0, t))
+        >> follow(0.08) >> (sine() * 0.22);
+    let sub = lfo(move |t: f64| fm3_.apply(f3.value() as f64 * 0.5, t))
+        >> follow(0.08) >> (sine() * 0.35);
     let osc = fundamental + second + sub;
 
     let cut_mod = lfo(move |t: f64| {
@@ -640,20 +675,22 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
     //   0.5 → 2.76 (classic inharmonic bell)
     //   1.0 → 4.18 (bright glassy)
     let char_m = p.character.clone();
+    let fmm = FreqMod::new(p, g);
+    let fmm_m = fmm.clone();
+    let fmm_c = fmm.clone();
+    let _ = (lb_m, lb_c);
     let modulator_freq = lfo(move |t: f64| {
         let c = char_m.value() as f64;
         let ratio = lerp3(1.41, 2.76, 4.18, c);
         let b = fm.value() as f64 * ratio;
-        lb_m.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    });
+        fmm_m.apply(b, t)
+    }) >> follow(0.08);
     let modulator = modulator_freq >> sine();
     let mod_scale = lfo(move |_t: f64| fm_depth.value().min(0.65) as f64 * 450.0);
     let modulator_scaled = modulator * mod_scale;
 
-    let carrier_base = lfo(move |t: f64| {
-        let b = fc.value() as f64;
-        lb_c.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    });
+    let carrier_base = lfo(move |t: f64| fmm_c.apply(fc.value() as f64, t))
+        >> follow(0.08);
     let bell_sig = (carrier_base + modulator_scaled) >> sine();
 
     let bpm_am = g.bpm.clone();
@@ -689,17 +726,18 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
     let voice_amp: f32 = 0.55 / OFFS.len() as f32;
 
     // Build the 7-voice saw stack by folding Net additions.
+    let fm = FreqMod::new(p, g);
     let mut stack: Option<Net> = None;
     for &off in OFFS.iter() {
         let f_c = p.freq.clone();
         let d_c = p.detune.clone();
-        let lb_c = lb.clone();
+        let fm_c = fm.clone();
         let voice = lfo(move |t: f64| {
             let width = (d_c.value().abs() as f64).max(1.0);
             let cents = off * width;
             let base = f_c.value() as f64 * 2.0_f64.powf(cents / 1200.0);
-            lb_c.apply(base, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-        }) >> (saw() * voice_amp);
+            fm_c.apply(base, t)
+        }) >> follow(0.08) >> (saw() * voice_amp);
         let wrapped = Net::wrap(Box::new(voice));
         stack = Some(match stack {
             Some(acc) => acc + wrapped,
@@ -710,11 +748,10 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
 
     // Sub-octave sine for weight.
     let f_sub = p.freq.clone();
-    let lb_sub = lb.clone();
-    let sub = lfo(move |t: f64| {
-        let b = f_sub.value() as f64 * 0.5;
-        lb_sub.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    }) >> (sine() * 0.22);
+    let fm_sub = fm.clone();
+    let _ = lb.clone();
+    let sub = lfo(move |t: f64| fm_sub.apply(f_sub.value() as f64 * 0.5, t))
+        >> follow(0.08) >> (sine() * 0.22);
     let sub_net = Net::wrap(Box::new(sub));
 
     let mixed = saw_stack + sub_net;
@@ -755,21 +792,20 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
 fn pluck_saw(p: &TrackParams, g: &GlobalParams) -> Net {
     let lb = LfoBundle::from_params(p);
 
+    let fm = FreqMod::new(p, g);
+    let fm_a = fm.clone();
+    let fm_b = fm.clone();
     let f_a = p.freq.clone();
-    let lb_a = lb.clone();
-    let osc_a = lfo(move |t: f64| {
-        let b = f_a.value() as f64;
-        lb_a.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    }) >> (saw() * 0.35);
+    let osc_a = lfo(move |t: f64| fm_a.apply(f_a.value() as f64, t))
+        >> follow(0.08) >> (saw() * 0.35);
 
     let f_b = p.freq.clone();
     let det = p.detune.clone();
-    let lb_b = lb.clone();
     let osc_b = lfo(move |t: f64| {
         let cents = det.value() as f64 * 0.5;
         let b = f_b.value() as f64 * 2.0_f64.powf(cents / 1200.0);
-        lb_b.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
-    }) >> (saw() * 0.35);
+        fm_b.apply(b, t)
+    }) >> follow(0.08) >> (saw() * 0.35);
     let osc = osc_a + osc_b;
 
     // Filter envelope: on each active step, cutoff decays from user

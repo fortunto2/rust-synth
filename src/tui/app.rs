@@ -606,7 +606,7 @@ fn handle_params_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
     let Some(track) = tracks.get(app.selected_track) else {
         return;
     };
-    let n_params = 12;
+    let n_params = 13;
 
     match key.code {
         KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => app.focus = Focus::Tracks,
@@ -728,6 +728,7 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
             p.lfo_target.set_value(next as f32);
         }
         11 => p.character.set_value((p.character.value() + 0.05 * sign).clamp(0.0, 1.0)),
+        12 => p.arp.set_value((p.arp.value() + 0.05 * sign).clamp(0.0, 1.0)),
         _ => {}
     }
 }

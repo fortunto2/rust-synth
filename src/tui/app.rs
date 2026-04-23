@@ -16,7 +16,8 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use std::io;
@@ -27,6 +28,7 @@ use crate::audio::engine::EngineHandle;
 use crate::audio::preset::PresetKind;
 use crate::audio::track::{Track, TrackParams};
 use crate::audio::vibe::{apply as apply_vibe, VibeKind};
+use crate::tui::theme::Theme;
 use crate::math::genetic::{crossover, mutate, Genome};
 use crate::math::harmony::{golden_pentatonic, rand_f32, rand_u32};
 use crate::math::life::Life;
@@ -374,14 +376,23 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         rec_text,
         status_text,
     );
+    let theme = Theme::NIGHT_CITY;
     let header_style = if engine.recorder.is_recording() {
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.warn()).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.fg()).add_modifier(Modifier::BOLD)
     };
     let header = Paragraph::new(header_text)
         .style(header_style)
-        .block(Block::default().borders(Borders::ALL).title(" rust-synth "));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.fg_dim()))
+                .title(Span::styled(
+                    " ☗  rust-synth  ",
+                    Style::default().fg(theme.accent()).add_modifier(Modifier::BOLD),
+                )),
+        );
     f.render_widget(header, rows[0]);
 
     // Life grid takes the whole width now — the old tempo pane duplicated
@@ -410,11 +421,15 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk·Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
+        Focus::Tracks => " ↑↓trk · Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
         Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
     })
-    .block(Block::default().borders(Borders::ALL))
-    .style(Style::default().fg(Color::Gray));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.fg_dim())),
+    )
+    .style(Style::default().fg(theme.secondary()));
     f.render_widget(help, rows[5]);
 }
 

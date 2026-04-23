@@ -54,6 +54,15 @@ pub fn scale_for(mode: u32) -> [f64; 5] {
     }
 }
 
+/// Motif-driven arpeggiator — replaces the previous random-walk-on-scale
+/// picker with a library of hand-crafted phrases (`super::motif`). Each
+/// track reads through the notes of its assigned motif in sequence,
+/// cycling. Produces recognisable melody rather than procedural noise.
+///
+/// `scale_mode` shifts the whole motif through a scale filter:
+///   0 (major) — motif notes as-is.
+///   1 (minor) — snap each note to its nearest minor-pentatonic degree.
+///   2 (bhairavi) — same but snapped to Bhairavi.
 #[inline]
 pub fn arp_offset_semitones(t: f64, bpm: f64, depth: f64, seed: u64, scale_mode: u32) -> f64 {
     let d = depth.clamp(0.0, 1.0);
@@ -62,13 +71,31 @@ pub fn arp_offset_semitones(t: f64, bpm: f64, depth: f64, seed: u64, scale_mode:
     }
     let beats_per_step = 2.0;
     let step = (t * bpm.max(1.0) / 60.0 / beats_per_step) as u64;
-    let scale = scale_for(scale_mode);
-    let mut h = seed ^ step.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    h ^= h >> 30;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^= h >> 27;
-    let idx = (h >> 32) as usize % scale.len();
-    scale[idx] * d
+    let raw = super::motif::offset_semitones(step, 1.0, seed);
+    let shaped = match scale_mode {
+        1 => snap_to_scale(raw, &SCALE_MINOR_PENT),
+        2 => snap_to_scale(raw, &SCALE_BHAIRAVI),
+        _ => raw,
+    };
+    shaped * d
+}
+
+/// Snap an arbitrary semitone offset onto the nearest scale degree
+/// within one octave (keeping sign). Used to re-harmonise a motif for
+/// minor / bhairavi vibes without rewriting the motif library.
+fn snap_to_scale(semis: f64, scale: &[f64; 5]) -> f64 {
+    let octave_base = (semis / 12.0).floor() as i32;
+    let in_octave = semis - octave_base as f64 * 12.0;
+    let mut best = scale[0];
+    let mut best_dist = (scale[0] - in_octave).abs();
+    for &s in &scale[1..] {
+        let d = (s - in_octave).abs();
+        if d < best_dist {
+            best_dist = d;
+            best = s;
+        }
+    }
+    best + octave_base as f64 * 12.0
 }
 
 #[cfg(test)]

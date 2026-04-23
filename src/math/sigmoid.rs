@@ -1,28 +1,24 @@
 //! Shaping functions for smooth modulation in [0.0, 1.0].
 //!
-//! Used inside `lfo(|t| …)` closures to drive filter cutoff, amplitude,
-//! reverb mix, chorus depth — anywhere a slow, musical transition matters.
+//! All time-domain functions use `f64` so they stay precise after hours
+//! of playback (FunDSP's `hacker` module is double-precision).
 
 /// Logistic sigmoid centered at `x0` with slope `k`.
-///
-/// At `t = x0` → 0.5. Higher `k` → sharper transition.
-/// Classic cinematic filter open: `sigmoid(t, 0.35, 10.0)` over 20s.
 #[inline]
-pub fn sigmoid(t: f32, k: f32, x0: f32) -> f32 {
+pub fn sigmoid(t: f64, k: f64, x0: f64) -> f64 {
     1.0 / (1.0 + (-k * (t - x0)).exp())
 }
 
 /// Hermite smoothstep — zero-derivative ends, used for seamless loops.
-/// Input clamped to [a, b].
 #[inline]
-pub fn smoothstep(t: f32, a: f32, b: f32) -> f32 {
+pub fn smoothstep(t: f64, a: f64, b: f64) -> f64 {
     let x = ((t - a) / (b - a)).clamp(0.0, 1.0);
     x * x * (3.0 - 2.0 * x)
 }
 
 /// Cubic ease-in-out on [0, 1] — softer than smoothstep.
 #[inline]
-pub fn ease_in_out(t: f32) -> f32 {
+pub fn ease_in_out(t: f64) -> f64 {
     let x = t.clamp(0.0, 1.0);
     if x < 0.5 {
         4.0 * x * x * x
@@ -34,7 +30,7 @@ pub fn ease_in_out(t: f32) -> f32 {
 
 /// Soft exponential — `rate` controls curvature, 0 → linear, 5 → steep.
 #[inline]
-pub fn softexp(t: f32, rate: f32) -> f32 {
+pub fn softexp(t: f64, rate: f64) -> f64 {
     let x = t.clamp(0.0, 1.0);
     if rate.abs() < 1e-6 {
         x
@@ -43,9 +39,8 @@ pub fn softexp(t: f32, rate: f32) -> f32 {
     }
 }
 
-/// Linear interpolation; helper so formulas read like math.
 #[inline]
-pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
@@ -56,7 +51,7 @@ mod tests {
 
     #[test]
     fn sigmoid_midpoint_is_half() {
-        assert_relative_eq!(sigmoid(5.0, 1.0, 5.0), 0.5, epsilon = 1e-6);
+        assert_relative_eq!(sigmoid(5.0, 1.0, 5.0), 0.5, epsilon = 1e-12);
     }
 
     #[test]
@@ -67,9 +62,9 @@ mod tests {
 
     #[test]
     fn ease_is_monotone() {
-        let samples: Vec<f32> = (0..=100).map(|i| ease_in_out(i as f32 / 100.0)).collect();
+        let samples: Vec<f64> = (0..=100).map(|i| ease_in_out(i as f64 / 100.0)).collect();
         for w in samples.windows(2) {
-            assert!(w[1] >= w[0] - 1e-6);
+            assert!(w[1] >= w[0] - 1e-12);
         }
     }
 }

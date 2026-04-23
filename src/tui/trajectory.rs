@@ -68,7 +68,9 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
             draw_curve(ctx, Color::Cyan, |dt| amplitude_curve(kind, &s, bpm, t0 + dt));
             draw_curve(ctx, Color::Yellow, |dt| cutoff_curve(kind, &s, bpm, t0 + dt));
             if matches!(kind, PresetKind::Heartbeat) || s.pulse_depth > 0.05 {
-                draw_curve(ctx, Color::Magenta, |dt| pulse_decay(t0 + dt, bpm, 9.0));
+                draw_curve(ctx, Color::Magenta, |dt| {
+                    pulse_decay((t0 + dt) as f64, bpm as f64, 9.0) as f32
+                });
             }
         });
 
@@ -105,11 +107,11 @@ fn amplitude_curve(
 ) -> f32 {
     let muted = if s.muted { 0.0 } else { 1.0 };
     let g = s.gain * muted;
-    let pulse = pulse_sine(t, bpm);
+    let pulse = pulse_sine(t as f64, bpm as f64) as f32;
     let voice = g * (1.0 - s.pulse_depth + s.pulse_depth * pulse);
     match kind {
         PresetKind::DroneSub => voice * (0.88 + 0.12 * pulse),
-        PresetKind::Heartbeat => voice * pulse_decay(t, bpm, 9.0),
+        PresetKind::Heartbeat => voice * pulse_decay(t as f64, bpm as f64, 9.0) as f32,
         _ => voice,
     }
 }

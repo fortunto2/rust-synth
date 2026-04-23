@@ -13,10 +13,10 @@ const STEPS: usize = 16;
 const PHRASE_BEATS: f32 = 16.0; // 4 bars × 4 beats
 
 pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle) {
-    let t = engine.phase_clock.value();
-    let bpm = engine.global.bpm.value();
+    let t = engine.phase_clock.value() as f64;
+    let bpm = engine.global.bpm.value() as f64;
     let beat = beat_phase(t, bpm);
-    let current = (beat * STEPS as f32) as usize % STEPS;
+    let current = (beat * STEPS as f64) as usize % STEPS;
 
     // Beat row: 16 squares, current one lit, every 4th brighter baseline.
     let mut beat_spans: Vec<Span> = Vec::with_capacity(STEPS * 2 + 1);
@@ -33,8 +33,8 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle) {
     }
 
     // Phrase row: 16 small blocks for phrase progress.
-    let phr = phrase_phase(t, bpm, PHRASE_BEATS);
-    let phr_idx = (phr * STEPS as f32) as usize % STEPS;
+    let phr = phrase_phase(t, bpm, PHRASE_BEATS as f64);
+    let phr_idx = (phr * STEPS as f64) as usize % STEPS;
     let mut phrase_spans: Vec<Span> = Vec::with_capacity(STEPS * 2 + 1);
     for i in 0..STEPS {
         let (glyph, color) = if i <= phr_idx {
@@ -53,7 +53,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle) {
         Line::from(beat_spans),
         Line::from(""),
         Line::from(vec![Span::styled(
-            format!(" phrase  {:.0}%  ({:.0}/{:.0} beats)", phr * 100.0, phr * PHRASE_BEATS, PHRASE_BEATS),
+            format!(" phrase  {:.0}%  ({:.0}/{:.0} beats)", phr * 100.0, phr * PHRASE_BEATS as f64, PHRASE_BEATS),
             Style::default().fg(Color::Gray),
         )]),
         Line::from(phrase_spans),

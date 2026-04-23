@@ -1,7 +1,7 @@
 //! Offline WAV render — deterministic, no audio device.
 
 use anyhow::{Context, Result};
-use fundsp::hacker32::*;
+use fundsp::hacker::*;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use rust_synth::audio::preset::{GlobalParams, Preset, PresetKind};
 use rust_synth::audio::track::TrackParams;

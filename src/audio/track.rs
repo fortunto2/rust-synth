@@ -1,31 +1,25 @@
 //! Track = one voice in the mix.
-//!
-//! Parameters are `Shared` atomics — the TUI thread writes, the audio
-//! thread reads them inside FunDSP `lfo` / `var` closures without locks.
 
-use fundsp::hacker32::*;
+use fundsp::hacker::*;
 
 use super::preset::PresetKind;
 
-/// Per-track live parameters. Cheap `Clone` (atomic refs).
 #[derive(Clone)]
 pub struct TrackParams {
-    pub gain: Shared,         // 0.0..1.0 — linear amplitude
-    pub cutoff: Shared,       // Hz — Moog filter cutoff
-    pub resonance: Shared,    // 0.0..1.0
-    pub detune: Shared,       // cents, -50..50
-    pub sweep_k: Shared,      // sigmoid slope (0.05..2.0)
-    pub sweep_center: Shared, // seconds — sigmoid midpoint
-    pub reverb_mix: Shared,   // 0.0..1.0
-    pub supermass: Shared,    // 0.0..1.0 — Valhalla-Supermassive-style long tail send
-    pub pulse_depth: Shared,  // 0.0..1.0 — how much BPM modulates amplitude
-    pub mute: Shared,         // 0.0 or 1.0 (1.0 = silent / dormant slot)
-    pub freq: Shared,         // Hz — root frequency (for active modulation)
+    pub gain: Shared,
+    pub cutoff: Shared,
+    pub resonance: Shared,
+    pub detune: Shared,
+    pub sweep_k: Shared,
+    pub sweep_center: Shared,
+    pub reverb_mix: Shared,
+    pub supermass: Shared,
+    pub pulse_depth: Shared,
+    pub mute: Shared,
+    pub freq: Shared,
 }
 
 impl TrackParams {
-    /// Sensible default so user input is immediately audible.
-    /// sigmoid_center=1.5s → filter opens in ~3s (fast intro, then user rules).
     pub fn default_for(freq: f32) -> Self {
         Self {
             gain: shared(0.45),
@@ -42,7 +36,6 @@ impl TrackParams {
         }
     }
 
-    /// Dormant slot — pre-allocated but silent.
     pub fn dormant(freq: f32) -> Self {
         let p = Self::default_for(freq);
         p.mute.set_value(1.0);
@@ -50,7 +43,8 @@ impl TrackParams {
         p
     }
 
-    /// Snapshot for TUI rendering.
+    /// TUI-facing snapshot — narrowed to f32 where only display
+    /// precision matters. Audio still runs on f64 internally.
     pub fn snapshot(&self) -> TrackSnapshot {
         TrackSnapshot {
             gain: self.gain.value(),

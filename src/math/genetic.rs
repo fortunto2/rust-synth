@@ -6,7 +6,7 @@
 //! snaps the frequency back onto a golden-pentatonic lattice so the mix
 //! stays harmonically coherent.
 
-use fundsp::hacker32::Shared;
+use fundsp::hacker::Shared;
 
 use super::harmony::{golden_pentatonic, rand_f32, rand_u32};
 

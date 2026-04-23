@@ -8,7 +8,7 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
-use fundsp::hacker32::*;
+use fundsp::hacker::*;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -128,8 +128,10 @@ fn start_stream(
     let mut env_l = 0.0f32;
     let mut env_r = 0.0f32;
     let fall = 0.9995f32;
-    let dt = 1.0 / sample_rate;
-    let mut t = 0.0f32;
+    // f64 accumulator — precise for hours, avoids the f32 drift that
+    // causes sub-rate LFOs to alias after ~5 minutes at 48 kHz.
+    let dt: f64 = 1.0 / sample_rate as f64;
+    let mut t: f64 = 0.0;
     let mut decim = 0usize;
 
     let stream = device.build_output_stream(
@@ -140,9 +142,11 @@ fn start_stream(
             let mut pending_n = 0usize;
 
             for frame in data.chunks_mut(channels) {
-                let (mut l, mut r) = graph.get_stereo();
-                l *= m;
-                r *= m;
+                let (lo, ro) = graph.get_stereo();
+                // hacker uses f64 internally (time counter precise for
+                // hours); get_stereo downcasts to f32 at the boundary.
+                let l = lo * m;
+                let r = ro * m;
                 env_l = (env_l * fall).max(l.abs());
                 env_r = (env_r * fall).max(r.abs());
 
@@ -176,7 +180,7 @@ fn start_stream(
 
             peak_l.set_value(env_l);
             peak_r.set_value(env_r);
-            phase_clock.set_value(t);
+            phase_clock.set_value(t as f32);
         },
         err_fn,
         None,

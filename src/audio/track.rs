@@ -37,6 +37,11 @@ pub struct TrackParams {
     /// LFO target index (quantised):
     ///   0 OFF · 1 CUT · 2 GAIN · 3 FREQ · 4 REV
     pub lfo_target: Shared,
+    /// Per-preset "character" knob in [0.0, 1.0]. Each preset interprets
+    /// this differently — Pad stretches partials, Bell shifts FM ratio,
+    /// Heartbeat scales the pitch drop, etc. Default 0.5 reproduces the
+    /// original hand-tuned formula; 0 and 1 are the two extremes.
+    pub character: Shared,
 }
 
 impl TrackParams {
@@ -60,6 +65,7 @@ impl TrackParams {
             lfo_rate: shared(0.5),
             lfo_depth: shared(0.0),
             lfo_target: shared(1.0), // CUT by default (only audible when depth > 0)
+            character: shared(0.5),  // neutral — reproduces the hand-tuned formula
         }
     }
 
@@ -91,6 +97,7 @@ impl TrackParams {
             lfo_rate: self.lfo_rate.value(),
             lfo_depth: self.lfo_depth.value(),
             lfo_target: self.lfo_target.value(),
+            character: self.character.value(),
             muted: self.mute.value() > 0.5,
         }
     }
@@ -114,6 +121,7 @@ pub struct TrackSnapshot {
     pub lfo_rate: f32,
     pub lfo_depth: f32,
     pub lfo_target: f32,
+    pub character: f32,
     pub muted: bool,
 }
 

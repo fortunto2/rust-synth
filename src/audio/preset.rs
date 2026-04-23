@@ -235,6 +235,19 @@ fn stereo_from_shared(s: Shared) -> Net {
     Net::wrap(Box::new(lfo(move |_t: f64| s.value() as f64) >> split::<U2>()))
 }
 
+/// Three-point linear interpolation: `c=0 → a`, `c=0.5 → b`, `c=1 → d`.
+/// Used by every preset's `character` morph so the neutral 0.5 setting
+/// reproduces the hand-tuned original formula exactly.
+#[inline]
+pub fn lerp3(a: f64, b: f64, d: f64, c: f64) -> f64 {
+    let c = c.clamp(0.0, 1.0);
+    if c < 0.5 {
+        a + (b - a) * (c * 2.0)
+    } else {
+        b + (d - b) * ((c - 0.5) * 2.0)
+    }
+}
+
 /// Reverb-mix signal that respects LFO when target = REV.
 /// Additive ±0.4 at depth=1, clamped to [0, 1].
 fn stereo_reverb_mix(base: Shared, lb: LfoBundle) -> Net {
@@ -305,20 +318,33 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         lb.clone(),
     );
 
+    // `character` morphs the partial ratios:
+    //   0.0 → pure harmonic [1, 2, 3, 4]  (octave + fifth + fourth)
+    //   0.5 → hand-tuned [1, 1.501, 2.013, 3.007]  (classic Zimmer)
+    //   1.0 → stretched [1, 1.618, 2.414, 3.739]  (golden-ratio inharmonic)
+    let char0 = p.character.clone();
+    let char1 = p.character.clone();
+    let char2 = p.character.clone();
     let osc = ((lfo(move |t: f64| {
             let b = f0.value() as f64;
             lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.30))
         + (lfo(move |t: f64| {
-            let b = f1.value() as f64 * 1.501 * (1.0 + d1.value() as f64 * 0.000578);
+            let c = char0.value() as f64;
+            let r = 1.0 + lerp3(1.0, 0.501, 0.618, c);
+            let b = f1.value() as f64 * r * (1.0 + d1.value() as f64 * 0.000578);
             lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.20))
         + (lfo(move |t: f64| {
-            let b = f2.value() as f64 * 2.013 * (1.0 + d2.value() as f64 * 0.000578);
+            let c = char1.value() as f64;
+            let r = 2.0 + lerp3(0.0, 0.013, 0.414, c);
+            let b = f2.value() as f64 * r * (1.0 + d2.value() as f64 * 0.000578);
             lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.14))
         + (lfo(move |t: f64| {
-            let b = f3.value() as f64 * 3.007;
+            let c = char2.value() as f64;
+            let r = 3.0 + lerp3(0.0, 0.007, 0.739, c);
+            let b = f3.value() as f64 * r;
             lb3.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.08)))
         * 0.9;
@@ -411,16 +437,29 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
     let f2 = p.freq.clone();
     let (lb0, lb1, lb2) = (lb.clone(), lb.clone(), lb.clone());
 
+    // `character` stretches the high partials from harmonic to inharmonic:
+    //   0.0 → pure [×2, ×3, ×4]
+    //   0.5 → current [×2, ×3, ×4.007]
+    //   1.0 → stretched [×2.1, ×3.3, ×4.8] (bell-like top end)
+    let char_s1 = p.character.clone();
+    let char_s2 = p.character.clone();
+    let char_s3 = p.character.clone();
     let osc = (lfo(move |t: f64| {
-            let b = f0.value() as f64 * 2.0;
+            let c = char_s1.value() as f64;
+            let r = lerp3(2.0, 2.0, 2.1, c);
+            let b = f0.value() as f64 * r;
             lb0.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.18))
         + (lfo(move |t: f64| {
-            let b = f1.value() as f64 * 3.0;
+            let c = char_s2.value() as f64;
+            let r = lerp3(3.0, 3.0, 3.3, c);
+            let b = f1.value() as f64 * r;
             lb1.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.12))
         + (lfo(move |t: f64| {
-            let b = f2.value() as f64 * 4.007;
+            let c = char_s3.value() as f64;
+            let r = lerp3(4.0, 4.007, 4.8, c);
+            let b = f2.value() as f64 * r;
             lb2.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
         }) >> (sine() * 0.08));
 
@@ -596,8 +635,15 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
     let fm_depth = p.resonance.clone();
     let (lb_c, lb_m) = (lb.clone(), lb.clone());
 
+    // `character` shifts FM ratio:
+    //   0.0 → 1.41 (harmonic-ish — metallic pad)
+    //   0.5 → 2.76 (classic inharmonic bell)
+    //   1.0 → 4.18 (bright glassy)
+    let char_m = p.character.clone();
     let modulator_freq = lfo(move |t: f64| {
-        let b = fm.value() as f64 * 2.76;
+        let c = char_m.value() as f64;
+        let ratio = lerp3(1.41, 2.76, 4.18, c);
+        let b = fm.value() as f64 * ratio;
         lb_m.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
     });
     let modulator = modulator_freq >> sine();

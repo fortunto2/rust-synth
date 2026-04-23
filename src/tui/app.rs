@@ -314,6 +314,7 @@ fn genome_of(p: &TrackParams) -> Genome<'_> {
         pulse_depth: &p.pulse_depth,
         pattern_hits: &p.pattern_hits,
         pattern_rotation: &p.pattern_rotation,
+        character: &p.character,
     }
 }
 
@@ -605,7 +606,7 @@ fn handle_params_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
     let Some(track) = tracks.get(app.selected_track) else {
         return;
     };
-    let n_params = 11;
+    let n_params = 12;
 
     match key.code {
         KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => app.focus = Focus::Tracks,
@@ -726,6 +727,7 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
             let next = (cur + sign as i32).rem_euclid(n);
             p.lfo_target.set_value(next as f32);
         }
+        11 => p.character.set_value((p.character.value() + 0.05 * sign).clamp(0.0, 1.0)),
         _ => {}
     }
 }
@@ -788,6 +790,10 @@ fn randomize_track(p: &TrackParams, seed: &mut u64) {
     p.resonance.set_value(0.1 + 0.4 * rand_f32(seed).abs());
     p.reverb_mix.set_value(0.3 + 0.6 * rand_f32(seed).abs());
     p.pulse_depth.set_value(0.2 * rand_f32(seed).abs());
+    // Re-roll the formula shape too — each preset interprets character
+    // as a different radical parameter (partial stretch, FM ratio,
+    // kick pitch drop, etc.). Full [0, 1] range for maximum variety.
+    p.character.set_value(rand_f32(seed).abs());
 }
 
 fn mutate_selected(app: &mut AppState, engine: &EngineHandle, strength: f32) {

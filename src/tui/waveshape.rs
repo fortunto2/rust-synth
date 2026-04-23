@@ -74,31 +74,36 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
 }
 
 fn describe(kind: PresetKind, s: &TrackSnapshot) -> (Color, String) {
+    let c = s.character as f64;
     match kind {
-        PresetKind::PadZimmer => (
-            Color::Cyan,
-            "4 detuned partials [1, 1.501, 2.013, 3.007]".to_string(),
-        ),
+        PresetKind::PadZimmer => {
+            let r1 = 1.0 + lerp3(1.0, 0.501, 0.618, c);
+            let r2 = 2.0 + lerp3(0.0, 0.013, 0.414, c);
+            let r3 = 3.0 + lerp3(0.0, 0.007, 0.739, c);
+            (Color::Cyan, format!("partials [1, {r1:.3}, {r2:.3}, {r3:.3}]"))
+        }
         PresetKind::DroneSub => (
             Color::Magenta,
-            format!("sub sine + brown @ ≤{} Hz", s.cutoff.min(300.0) as u32),
+            format!("sub sine + noise @ ≤{} Hz", s.cutoff.min(300.0) as u32),
         ),
-        PresetKind::Shimmer => (
-            Color::LightYellow,
-            "3 high partials [×2, ×3, ×4.007]".to_string(),
-        ),
-        PresetKind::Heartbeat => (
-            Color::Red,
-            "kick body · pitch-swept sine".to_string(),
-        ),
+        PresetKind::Shimmer => {
+            let r1 = lerp3(2.0, 2.0, 2.1, c);
+            let r2 = lerp3(3.0, 3.0, 3.3, c);
+            let r3 = lerp3(4.0, 4.007, 4.8, c);
+            (Color::LightYellow, format!("partials [×{r1:.2}, ×{r2:.2}, ×{r3:.2}]"))
+        }
+        PresetKind::Heartbeat => {
+            let drop = lerp3(0.3, 1.5, 3.0, c);
+            (Color::Red, format!("pitch-swept kick · drop ×{drop:.2}"))
+        }
         PresetKind::BassPulse => (
             Color::Green,
             "sine stack [×½, ×1, ×2]".to_string(),
         ),
-        PresetKind::Bell => (
-            Color::LightBlue,
-            format!("FM · mod 2.76, depth {:.2}", s.resonance.min(0.65)),
-        ),
+        PresetKind::Bell => {
+            let ratio = lerp3(1.41, 2.76, 4.18, c);
+            (Color::LightBlue, format!("FM ratio {ratio:.2} · depth {:.2}", s.resonance.min(0.65)))
+        }
         PresetKind::SuperSaw => (
             Color::LightGreen,
             format!("7-saw unison · spread {:.0} ct", s.detune.abs()),
@@ -107,6 +112,16 @@ fn describe(kind: PresetKind, s: &TrackSnapshot) -> (Color, String) {
             Color::Yellow,
             format!("2-saw · detune {:+.0} ct", s.detune),
         ),
+    }
+}
+
+// Local lerp3 so we don't need to cross-import from audio::preset.
+fn lerp3(a: f64, b: f64, d: f64, c: f64) -> f64 {
+    let c = c.clamp(0.0, 1.0);
+    if c < 0.5 {
+        a + (b - a) * (c * 2.0)
+    } else {
+        b + (d - b) * ((c - 0.5) * 2.0)
     }
 }
 
@@ -132,13 +147,17 @@ fn draw_waveshape(ctx: &mut Context, kind: PresetKind, s: &TrackSnapshot, color:
 fn sample(kind: PresetKind, s: &TrackSnapshot, phase: f64) -> f64 {
     let tau = std::f64::consts::TAU;
     let p = tau * phase;
+    let c = s.character as f64;
     match kind {
         PresetKind::PadZimmer => {
             let det = s.detune as f64 * 0.000578;
+            let r1 = 1.0 + lerp3(1.0, 0.501, 0.618, c);
+            let r2 = 2.0 + lerp3(0.0, 0.013, 0.414, c);
+            let r3 = 3.0 + lerp3(0.0, 0.007, 0.739, c);
             0.30 * (p * 1.000).sin()
-                + 0.20 * (p * 1.501 * (1.0 + det)).sin()
-                + 0.14 * (p * 2.013 * (1.0 + det)).sin()
-                + 0.08 * (p * 3.007).sin()
+                + 0.20 * (p * r1 * (1.0 + det)).sin()
+                + 0.14 * (p * r2 * (1.0 + det)).sin()
+                + 0.08 * (p * r3).sin()
         }
         PresetKind::DroneSub => {
             // Sub sine + small pseudo-noise (deterministic) — the real
@@ -147,12 +166,14 @@ fn sample(kind: PresetKind, s: &TrackSnapshot, phase: f64) -> f64 {
             0.60 * (p * 0.5).sin() + 0.15 * (p * 1.0).sin() + 0.08 * (p * 2.03).sin()
         }
         PresetKind::Shimmer => {
-            0.40 * (p * 2.000).sin() + 0.30 * (p * 3.000).sin() + 0.20 * (p * 4.007).sin()
+            let r1 = lerp3(2.0, 2.0, 2.1, c);
+            let r2 = lerp3(3.0, 3.0, 3.3, c);
+            let r3 = lerp3(4.0, 4.007, 4.8, c);
+            0.40 * (p * r1).sin() + 0.30 * (p * r2).sin() + 0.20 * (p * r3).sin()
         }
         PresetKind::Heartbeat => {
-            // Show the kick body shape: pitch-swept sine across the 2
-            // cycles — starts fast, slows. env decay layered on top.
-            let pitch = 0.7 + 1.5 * (-phase * 5.0).exp();
+            let drop_scale = lerp3(0.3, 1.5, 3.0, c);
+            let pitch = 0.7 + drop_scale * (-phase * 5.0).exp();
             let env = (-phase * 2.5).exp();
             (p * pitch).sin() * env
         }
@@ -160,10 +181,9 @@ fn sample(kind: PresetKind, s: &TrackSnapshot, phase: f64) -> f64 {
             0.55 * (p * 1.0).sin() + 0.22 * (p * 2.0).sin() + 0.35 * (p * 0.5).sin()
         }
         PresetKind::Bell => {
-            // Real preset: mod_freq = f·2.76, mod amplitude = resonance·450 Hz.
-            // Modulation index for visualisation: resonance·3 (dimensionless).
             let depth = s.resonance.min(0.65) as f64;
-            let modulator = (p * 2.76).sin() * (depth * 3.5);
+            let ratio = lerp3(1.41, 2.76, 4.18, c);
+            let modulator = (p * ratio).sin() * (depth * 3.5);
             (p + modulator).sin()
         }
         PresetKind::SuperSaw => {

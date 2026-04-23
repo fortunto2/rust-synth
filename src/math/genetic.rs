@@ -20,6 +20,7 @@ pub struct Genome<'a> {
     pub pulse_depth: &'a Shared,
     pub pattern_hits: &'a Shared,
     pub pattern_rotation: &'a Shared,
+    pub character: &'a Shared,
 }
 
 /// Mutate a single gene slot. `strength` in [0, 1]:
@@ -61,6 +62,11 @@ pub fn mutate(g: &Genome, seed: &mut u64, strength: f32) {
     g.pattern_hits.set_value(hits);
     let rot = (g.pattern_rotation.value() + s * 4.0 * rand_f32(seed)).rem_euclid(16.0);
     g.pattern_rotation.set_value(rot);
+
+    // Character — formula-shape drift. Wider strength because the
+    // audible effect per unit is smaller than cutoff / gain drift.
+    let ch = (g.character.value() + s * 0.35 * rand_f32(seed)).clamp(0.0, 1.0);
+    g.character.set_value(ch);
 }
 
 /// Uniform crossover — each gene comes from `a` or `b` with 50/50 chance.
@@ -86,6 +92,9 @@ pub fn crossover(a: &Genome, b: &Genome, seed: &mut u64) {
     }
     if rand_u32(seed, 2) == 0 {
         a.pattern_rotation.set_value(b.pattern_rotation.value());
+    }
+    if rand_u32(seed, 2) == 0 {
+        a.character.set_value(b.character.value());
     }
     // Snap freq after crossover.
     let cur = a.freq.value();

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use super::preset::{GlobalParams, Preset, PresetKind};
 use super::track::Track;
 use crate::math::harmony::golden_freq;
+use crate::recording::RecorderState;
 
 /// Max tracks pre-allocated. Raise = more CPU, more slots.
 pub const MAX_TRACKS: usize = 8;
@@ -36,6 +37,7 @@ pub struct EngineHandle {
     pub sample_rate: f32,
     pub scope: ScopeBuffer,
     pub phase_clock: Shared,
+    pub recorder: Arc<RecorderState>,
     _stream: Stream,
 }
 
@@ -63,6 +65,7 @@ impl AudioEngine {
         let phase_clock = shared(0.0);
         let scope: ScopeBuffer = Arc::new(Mutex::new(VecDeque::with_capacity(SCOPE_CAPACITY)));
         let tracks = Arc::new(Mutex::new(initial_tracks));
+        let recorder = RecorderState::new(sample_rate as u32);
 
         let mut graph = build_master(&tracks.lock(), &global);
         graph.set_sample_rate(sample_rate as f64);
@@ -78,6 +81,7 @@ impl AudioEngine {
             peak_r.clone(),
             scope.clone(),
             phase_clock.clone(),
+            recorder.clone(),
         )?;
 
         Ok(EngineHandle {
@@ -88,6 +92,7 @@ impl AudioEngine {
             sample_rate,
             scope,
             phase_clock,
+            recorder,
             _stream: stream,
         })
     }
@@ -117,6 +122,7 @@ fn start_stream(
     peak_r: Shared,
     scope: ScopeBuffer,
     phase_clock: Shared,
+    recorder: Arc<RecorderState>,
 ) -> Result<Stream> {
     let err_fn = |err| tracing::error!("audio stream error: {err}");
     let mut env_l = 0.0f32;
@@ -143,6 +149,10 @@ fn start_stream(
                 for (ch, slot) in frame.iter_mut().enumerate() {
                     *slot = if ch & 1 == 0 { l } else { r };
                 }
+
+                // Record master output if active. Lock is held for a
+                // handful of ns per frame — safe at 48 kHz.
+                recorder.push_frame(l, r);
 
                 decim = decim.wrapping_add(1);
                 if decim.is_multiple_of(SCOPE_DECIMATION) && pending_n < pending.len() {

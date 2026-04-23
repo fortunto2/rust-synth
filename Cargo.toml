@@ -32,6 +32,14 @@ hound = "3.5"
 ratatui = "0.29"
 crossterm = "0.28"
 
+# Persistence
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+chrono = "0.4"
+
+# Lossless audio encoder for recordings
+flacenc = "0.5"
+
 # Errors + logging
 anyhow = "1"
 thiserror = "2"
@@ -43,6 +51,7 @@ parking_lot = "0.12"
 
 [dev-dependencies]
 approx = "0.5"
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

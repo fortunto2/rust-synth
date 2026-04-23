@@ -5,7 +5,10 @@ Cargo.lock.bak
 
 # Rendered audio
 /out
+/recordings
+/presets
 *.wav
+*.flac
 !docs/**/*.wav
 
 # Profiling

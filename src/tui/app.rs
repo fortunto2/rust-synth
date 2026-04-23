@@ -20,6 +20,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 use std::io;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::audio::engine::EngineHandle;
@@ -28,10 +29,12 @@ use crate::audio::track::{Track, TrackParams};
 use crate::math::genetic::{crossover, mutate, Genome};
 use crate::math::harmony::{golden_pentatonic, rand_f32, rand_u32};
 use crate::math::life::Life;
+use crate::{persistence, recording};
 
 const LIFE_ROWS: usize = 8;
 const LIFE_COLS: usize = 22;
 const DEFAULT_EVOLVE_PERIOD: u32 = 16;
+const STATUS_TTL: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
@@ -53,6 +56,11 @@ pub struct AppState {
     pub evolve_period: u32,
     pub coupling: bool,
     pub auto_evolve: bool,
+
+    // ── Status message shown briefly after save / load / record ──
+    pub status: Option<(Instant, String)>,
+    pub presets_dir: PathBuf,
+    pub recordings_dir: PathBuf,
 }
 
 impl AppState {
@@ -72,6 +80,20 @@ impl AppState {
             evolve_period: DEFAULT_EVOLVE_PERIOD,
             coupling: true,
             auto_evolve: true,
+            status: None,
+            presets_dir: PathBuf::from("presets"),
+            recordings_dir: PathBuf::from("recordings"),
+        }
+    }
+
+    fn set_status(&mut self, text: impl Into<String>) {
+        self.status = Some((Instant::now(), text.into()));
+    }
+
+    fn current_status(&self) -> Option<&str> {
+        match &self.status {
+            Some((at, text)) if at.elapsed() < STATUS_TTL => Some(text),
+            _ => None,
         }
     }
 }
@@ -238,19 +260,32 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         ])
         .split(area);
 
-    let header = Paragraph::new(format!(
-        " rust-synth · master {:>3.0}%  peak L{:>4.2} R{:>4.2}  SR{:.0}  t{:>6.1}s  ·  couple {}  evolve {}  gen {}",
+    let rec_text = if engine.recorder.is_recording() {
+        format!(" REC ● {:>5.1}s", engine.recorder.elapsed_seconds())
+    } else {
+        "".to_string()
+    };
+    let status_text = app.current_status().map(|s| format!(" · {s}")).unwrap_or_default();
+    let header_text = format!(
+        " rust-synth · master {:>3.0}%  peak L{:>4.2} R{:>4.2}  t{:>6.1}s  couple {} evolve {} gen {}{}{}",
         engine.global.master_gain.value() * 100.0,
         engine.peak_l.value(),
         engine.peak_r.value(),
-        engine.sample_rate,
         engine.phase_clock.value(),
         on_off(app.coupling),
         on_off(app.auto_evolve),
         app.life.generation,
-    ))
-    .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
-    .block(Block::default().borders(Borders::ALL).title(" rust-synth "));
+        rec_text,
+        status_text,
+    );
+    let header_style = if engine.recorder.is_recording() {
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    };
+    let header = Paragraph::new(header_text)
+        .style(header_style)
+        .block(Block::default().borders(Borders::ALL).title(" rust-synth "));
     f.render_widget(header, rows[0]);
 
     let top = Layout::default()
@@ -280,8 +315,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓track · Enter→params · a add · d kill · m mute · r rand · e/E mutate · x cross · S/s supermass · L/O toggle · ,/. bpm · [/] master · q quit ",
-        Focus::Params => " ↑↓param · ←→ adjust · Esc/Tab ←tracks · e/E mutate · x cross · S/s supermass · L/O toggle · ,/. bpm · [/] master · q quit ",
+        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · r rand · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · [/] mstr · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · [/] mstr · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
@@ -290,6 +325,12 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
 
 fn on_off(b: bool) -> &'static str {
     if b { "ON " } else { "off" }
+}
+
+fn short_path(p: &std::path::Path) -> String {
+    p.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| p.display().to_string())
 }
 
 // ─── Key handling ───────────────────────────────────────────────────────
@@ -364,6 +405,39 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
             let tracks = engine.tracks.lock();
             if let Some(track) = tracks.get(app.selected_track) {
                 track.params.supermass.set_value(0.0);
+            }
+            return;
+        }
+        KeyCode::Char('w') => {
+            match persistence::save(&app.presets_dir, engine) {
+                Ok(path) => app.set_status(format!("saved preset → {}", short_path(&path))),
+                Err(e) => app.set_status(format!("save failed: {e}")),
+            }
+            return;
+        }
+        KeyCode::Char('l') => {
+            match persistence::load_latest(&app.presets_dir, engine) {
+                Ok(Some((path, n))) => {
+                    app.set_status(format!("loaded {} ({} slots) ← {}", n, n, short_path(&path)));
+                }
+                Ok(None) => app.set_status("no presets/ folder yet — press w first".to_string()),
+                Err(e) => app.set_status(format!("load failed: {e}")),
+            }
+            return;
+        }
+        KeyCode::Char('c') => {
+            if engine.recorder.is_recording() {
+                match engine.recorder.stop_and_encode(&app.recordings_dir) {
+                    Ok(path) => app.set_status(format!(
+                        "rec → {} (encoding in bg, up to {}m cap)",
+                        short_path(&path),
+                        recording::MAX_MINUTES
+                    )),
+                    Err(e) => app.set_status(format!("stop failed: {e}")),
+                }
+            } else {
+                engine.recorder.start();
+                app.set_status(format!("recording started (cap {}m)", recording::MAX_MINUTES));
             }
             return;
         }

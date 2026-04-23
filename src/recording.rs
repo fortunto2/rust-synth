@@ -7,6 +7,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
+use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,6 +18,39 @@ const CHANNELS: usize = 2;
 /// At 48 kHz stereo f32: 15 min ≈ 345 MB.
 pub const MAX_MINUTES: u32 = 15;
 
+/// Container / codec for a recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordFormat {
+    /// Lossless 24-bit FLAC — biggest file, master-quality.
+    Flac,
+    /// OGG Vorbis at quality 0.6 (~128 kbps) — smaller, streamable,
+    /// near-transparent for ambient material.
+    Ogg,
+}
+
+impl RecordFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            RecordFormat::Flac => "flac",
+            RecordFormat::Ogg => "ogg",
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            RecordFormat::Flac => "flac",
+            RecordFormat::Ogg => "ogg",
+        }
+    }
+
+    pub fn toggle(self) -> Self {
+        match self {
+            RecordFormat::Flac => RecordFormat::Ogg,
+            RecordFormat::Ogg => RecordFormat::Flac,
+        }
+    }
+}
+
 /// Handle shared between audio callback and UI thread.
 ///
 /// - Callback: `buffer.lock()` and pushes f32 interleaved samples.
@@ -26,6 +60,9 @@ pub struct RecorderState {
     pub started_at: Mutex<Option<Instant>>,
     pub sample_rate: u32,
     pub max_samples: usize,
+    /// Which container to write when the user stops recording.
+    /// Defaults to FLAC; toggled by the `f` key in the TUI.
+    pub format: Mutex<RecordFormat>,
 }
 
 impl RecorderState {
@@ -36,6 +73,7 @@ impl RecorderState {
             started_at: Mutex::new(None),
             sample_rate,
             max_samples,
+            format: Mutex::new(RecordFormat::Flac),
         })
     }
 
@@ -74,26 +112,46 @@ impl RecorderState {
         std::fs::create_dir_all(dir).context("create recordings dir")?;
         let samples = self.buffer.lock().take().ok_or_else(|| anyhow!("not recording"))?;
         *self.started_at.lock() = None;
+        let format = *self.format.lock();
 
         let name = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-        let path = dir.join(format!("{name}.flac"));
+        let path = dir.join(format!("{name}.{}", format.extension()));
         let sr = self.sample_rate;
         let target = path.clone();
 
         std::thread::spawn(move || {
-            if let Err(e) = encode_flac(&samples, sr, &target) {
-                tracing::error!("FLAC encode failed for {}: {e}", target.display());
-            } else {
-                tracing::info!(
+            let result = match format {
+                RecordFormat::Flac => encode_flac(&samples, sr, &target),
+                RecordFormat::Ogg => encode_ogg(&samples, sr, &target),
+            };
+            match result {
+                Ok(()) => tracing::info!(
                     "wrote {} ({:.1}s, {:.1} MB)",
                     target.display(),
                     samples.len() as f32 / (sr as f32 * CHANNELS as f32),
-                    std::fs::metadata(&target).map(|m| m.len() as f32 / 1_048_576.0).unwrap_or(0.0),
-                );
+                    std::fs::metadata(&target)
+                        .map(|m| m.len() as f32 / 1_048_576.0)
+                        .unwrap_or(0.0),
+                ),
+                Err(e) => tracing::error!(
+                    "{} encode failed for {}: {e}",
+                    format.label().to_uppercase(),
+                    target.display()
+                ),
             }
         });
 
         Ok(path)
+    }
+
+    pub fn toggle_format(&self) -> RecordFormat {
+        let mut f = self.format.lock();
+        *f = f.toggle();
+        *f
+    }
+
+    pub fn current_format(&self) -> RecordFormat {
+        *self.format.lock()
     }
 }
 
@@ -130,9 +188,69 @@ fn encode_flac(samples: &[f32], sample_rate: u32, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Encode the interleaved f32 buffer as OGG Vorbis (quality ≈0.6,
+/// ~128 kbps — transparent for ambient material at ~1/5 the size of
+/// FLAC). `vorbis_rs` consumes planar `&[&[f32]]` so we deinterleave
+/// once into two channel vectors before handing off.
+fn encode_ogg(samples: &[f32], sample_rate: u32, path: &Path) -> Result<()> {
+    let frames = samples.len() / CHANNELS;
+    let mut left = Vec::with_capacity(frames);
+    let mut right = Vec::with_capacity(frames);
+    for frame in samples.chunks_exact(CHANNELS) {
+        left.push(frame[0]);
+        right.push(frame[1]);
+    }
+
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("create {}", path.display()))?;
+
+    let sr = std::num::NonZeroU32::new(sample_rate)
+        .ok_or_else(|| anyhow!("sample rate must be non-zero"))?;
+    let channels = NonZeroU8::new(CHANNELS as u8)
+        .ok_or_else(|| anyhow!("channels must be non-zero"))?;
+
+    let mut encoder = vorbis_rs::VorbisEncoderBuilder::new(sr, channels, file)
+        .map_err(|e| anyhow!("vorbis builder: {e}"))?
+        .build()
+        .map_err(|e| anyhow!("vorbis build: {e}"))?;
+
+    encoder
+        .encode_audio_block([&left[..], &right[..]])
+        .map_err(|e| anyhow!("vorbis encode: {e}"))?;
+    encoder
+        .finish()
+        .map_err(|e| anyhow!("vorbis finish: {e}"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synth_samples(seconds: f32, sr: u32) -> Vec<f32> {
+        let n = (seconds * sr as f32) as usize;
+        let mut samples = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let v = (i as f32 / sr as f32 * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+            samples.push(v);
+            samples.push(v);
+        }
+        samples
+    }
+
+    #[test]
+    fn encodes_short_buffer_to_valid_ogg() {
+        let sr = 48_000u32;
+        let samples = synth_samples(0.1, sr);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.ogg");
+        encode_ogg(&samples, sr, &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() > 100, "ogg too small: {}", bytes.len());
+        // OGG magic: 'OggS' at start.
+        assert_eq!(&bytes[..4], b"OggS");
+    }
 
     #[test]
     fn encodes_short_buffer_to_valid_flac() {

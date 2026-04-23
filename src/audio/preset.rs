@@ -462,7 +462,12 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
     let am = lfo(move |t: f64| 0.88 + 0.12 * pulse_sine(t, bpm_am.value() as f64));
     let body = (sub + noise_body) * am;
 
-    let stereo = body >> split::<U2>() >> reverb_stereo(20.0, 5.0, 0.85);
+    // Stereo widening: chorus L/R with different delays turns the mono
+    // body into a real wide stereo image before the reverb.
+    let stereo = body
+        >> split::<U2>()
+        >> (chorus(10, 0.0, 0.025, 0.18) | chorus(11, 0.0, 0.031, 0.18))
+        >> reverb_stereo(20.0, 5.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
@@ -514,7 +519,12 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         }) >> follow(0.08) >> (sine() * 0.08));
 
     let bright = osc >> highpass_hz(400.0, 0.5);
-    let stereo = bright >> split::<U2>() >> reverb_stereo(22.0, 6.0, 0.85);
+    // Dual chorus gives the shimmer actual stereo spread, not just
+    // reverb-ambient stereo from a mono source.
+    let stereo = bright
+        >> split::<U2>()
+        >> (chorus(20, 0.0, 0.008, 0.6) | chorus(21, 0.0, 0.011, 0.6))
+        >> reverb_stereo(22.0, 6.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
@@ -622,7 +632,13 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
 
     let kick = body + sub_scaled + click;
 
-    let stereo = kick >> split::<U2>() >> reverb_stereo(10.0, 1.5, 0.88);
+    // Haas-effect stereo: 8 ms L/R delay widens the kick without
+    // destroying its punch (subtle enough to avoid phase cancellation
+    // on mono playback).
+    let stereo = kick
+        >> split::<U2>()
+        >> (pass() | delay(0.008))
+        >> reverb_stereo(10.0, 1.5, 0.88);
 
     let lb = LfoBundle::from_params(p);
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
@@ -675,7 +691,12 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
     });
     let grooved = filtered * groove;
 
-    let stereo = grooved >> split::<U2>() >> reverb_stereo(14.0, 2.5, 0.88);
+    // Haas 14 ms — widens the bass line but stays mono-compatible so
+    // sub content still sums properly on club systems.
+    let stereo = grooved
+        >> split::<U2>()
+        >> (pass() | delay(0.014))
+        >> reverb_stereo(14.0, 2.5, 0.88);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
@@ -728,7 +749,11 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
     let am = lfo(move |t: f64| 0.85 + 0.15 * pulse_sine(t, bpm_am.value() as f64 * 0.25));
     let body = bell_sig * am * 0.30;
 
-    let stereo = body >> split::<U2>() >> reverb_stereo(25.0, 8.0, 0.85);
+    // Dual chorus gives the FM tone true stereo movement — bells need it.
+    let stereo = body
+        >> split::<U2>()
+        >> (chorus(30, 0.0, 0.018, 0.25) | chorus(31, 0.0, 0.022, 0.25))
+        >> reverb_stereo(25.0, 8.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());

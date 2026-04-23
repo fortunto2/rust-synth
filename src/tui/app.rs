@@ -339,7 +339,11 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .split(area);
 
     let rec_text = if engine.recorder.is_recording() {
-        format!(" REC ● {:>5.1}s", engine.recorder.elapsed_seconds())
+        format!(
+            " REC·{} ● {:>5.1}s",
+            engine.recorder.current_format().label(),
+            engine.recorder.elapsed_seconds()
+        )
     } else {
         "".to_string()
     };
@@ -406,8 +410,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk·Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
+        Focus::Tracks => " ↑↓trk·Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
@@ -557,18 +561,32 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
         }
         KeyCode::Char('c') => {
             if engine.recorder.is_recording() {
+                let fmt = engine.recorder.current_format();
                 match engine.recorder.stop_and_encode(&app.recordings_dir) {
                     Ok(path) => app.set_status(format!(
-                        "rec → {} (encoding in bg, up to {}m cap)",
+                        "rec → {} ({} encoding in bg)",
                         short_path(&path),
-                        recording::MAX_MINUTES
+                        fmt.label()
                     )),
                     Err(e) => app.set_status(format!("stop failed: {e}")),
                 }
             } else {
                 engine.recorder.start();
-                app.set_status(format!("recording started (cap {}m)", recording::MAX_MINUTES));
+                app.set_status(format!(
+                    "recording started ({} format · cap {}m · press f to toggle)",
+                    engine.recorder.current_format().label(),
+                    recording::MAX_MINUTES
+                ));
             }
+            return;
+        }
+        KeyCode::Char('f') => {
+            let fmt = engine.recorder.toggle_format();
+            app.set_status(format!(
+                "recording format → {} (next 'c' will write .{})",
+                fmt.label(),
+                fmt.extension()
+            ));
             return;
         }
         _ => {}

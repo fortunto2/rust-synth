@@ -75,6 +75,8 @@ pub struct GlobalParams {
     /// A shelf keeps the mids full, so lowering it removes harshness
     /// without sounding like a volume drop.
     pub brightness: Shared,
+    /// Arpeggiator scale mode — 0 major pent · 1 minor pent · 2 bhairavi.
+    pub scale_mode: Shared,
 }
 
 impl Default for GlobalParams {
@@ -83,6 +85,7 @@ impl Default for GlobalParams {
             bpm: shared(72.0),
             master_gain: shared(0.7),
             brightness: shared(0.6),
+            scale_mode: shared(0.0),
         }
     }
 }
@@ -255,6 +258,7 @@ pub fn lerp3(a: f64, b: f64, d: f64, c: f64) -> f64 {
 pub struct FreqMod {
     pub arp: Shared,
     pub bpm: Shared,
+    pub scale_mode: Shared,
     pub lb: LfoBundle,
 }
 
@@ -263,6 +267,7 @@ impl FreqMod {
         Self {
             arp: p.arp.clone(),
             bpm: g.bpm.clone(),
+            scale_mode: g.scale_mode.clone(),
             lb: LfoBundle::from_params(p),
         }
     }
@@ -273,7 +278,14 @@ impl FreqMod {
     #[inline]
     pub fn apply(&self, base: f64, t: f64) -> f64 {
         let seed = (base.max(1.0).ln() * 1_000.0) as u64;
-        let off = arp_offset_semitones(t, self.bpm.value() as f64, self.arp.value() as f64, seed);
+        let scale = self.scale_mode.value().round() as u32;
+        let off = arp_offset_semitones(
+            t,
+            self.bpm.value() as f64,
+            self.arp.value() as f64,
+            seed,
+            scale,
+        );
         let arped = base * 2.0_f64.powf(off / 12.0);
         self.lb
             .apply(arped, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))

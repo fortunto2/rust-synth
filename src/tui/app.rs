@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use crate::audio::engine::EngineHandle;
 use crate::audio::preset::PresetKind;
 use crate::audio::track::{Track, TrackParams};
+use crate::audio::vibe::{apply as apply_vibe, VibeKind};
 use crate::math::genetic::{crossover, mutate, Genome};
 use crate::math::harmony::{golden_pentatonic, rand_f32, rand_u32};
 use crate::math::life::Life;
@@ -66,6 +67,7 @@ pub struct AppState {
     pub status: Option<(Instant, String)>,
     pub presets_dir: PathBuf,
     pub recordings_dir: PathBuf,
+    pub current_vibe: VibeKind,
 }
 
 impl AppState {
@@ -88,6 +90,7 @@ impl AppState {
             status: None,
             presets_dir: PathBuf::from("presets"),
             recordings_dir: PathBuf::from("recordings"),
+            current_vibe: VibeKind::Default,
         }
     }
 
@@ -346,12 +349,19 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         crate::audio::preset::brightness_to_shelf_gain(brightness as f64),
     );
     let lp_cutoff = crate::audio::preset::brightness_to_lp_cutoff(brightness as f64);
+    let scale_name = match engine.global.scale_mode.value().round() as u32 {
+        1 => "minor",
+        2 => "bhairavi",
+        _ => "major",
+    };
     let header_text = format!(
-        " rust-synth · mstr {:>3.0}%  brt {:>3.0}% ({:>+5.1}dB shelf +LP@{:>5.0}Hz)  peak L{:>4.2} R{:>4.2}  couple {} evolve {} gen {}{}{}",
+        " rust-synth · {} · mstr {:>3.0}%  brt {:>3.0}% ({:>+5.1}dB +LP@{:>5.0}Hz)  bpm {:>4.1}  scale {scale_name}  peak L{:>4.2} R{:>4.2}  couple {} evolve {} gen {}{}{}",
+        app.current_vibe.label(),
         engine.global.master_gain.value() * 100.0,
         brightness * 100.0,
         shelf_db,
         lp_cutoff,
+        engine.global.bpm.value(),
         engine.peak_l.value(),
         engine.peak_r.value(),
         on_off(app.coupling),
@@ -396,8 +406,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
+        Focus::Tracks => " ↑↓trk·Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
@@ -519,6 +529,13 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
         }
         KeyCode::Char('T') => {
             cycle_kind(engine, app, false);
+            return;
+        }
+        KeyCode::Char('V') => {
+            let next = app.current_vibe.next();
+            apply_vibe(engine, next);
+            app.current_vibe = next;
+            app.set_status(format!("vibe → {}", next.label()));
             return;
         }
         KeyCode::Char('w') => {

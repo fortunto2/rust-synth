@@ -37,23 +37,38 @@ pub fn phrase_phase(t: f64, bpm: f64, beats: f64) -> f64 {
 ///
 /// Combine with a `follow(0.08)` on the freq control to glide between
 /// steps (portamento) instead of stepping discretely.
+/// Scale mode for the arpeggiator. Higher numbers = more exotic.
+///   0 Major pent  [0, 2, 4, 7, 9]    — optimistic, default
+///   1 Minor pent  [0, 3, 5, 7, 10]   — melancholic, Blade-Runner-ish
+///   2 Bhairavi    [0, 1, 4, 5, 7]    — raga, exotic
+pub const SCALE_MAJOR_PENT: [f64; 5] = [0.0, 2.0, 4.0, 7.0, 9.0];
+pub const SCALE_MINOR_PENT: [f64; 5] = [0.0, 3.0, 5.0, 7.0, 10.0];
+pub const SCALE_BHAIRAVI: [f64; 5] = [0.0, 1.0, 4.0, 5.0, 7.0];
+
 #[inline]
-pub fn arp_offset_semitones(t: f64, bpm: f64, depth: f64, seed: u64) -> f64 {
+pub fn scale_for(mode: u32) -> [f64; 5] {
+    match mode {
+        1 => SCALE_MINOR_PENT,
+        2 => SCALE_BHAIRAVI,
+        _ => SCALE_MAJOR_PENT,
+    }
+}
+
+#[inline]
+pub fn arp_offset_semitones(t: f64, bpm: f64, depth: f64, seed: u64, scale_mode: u32) -> f64 {
     let d = depth.clamp(0.0, 1.0);
     if d < 1.0e-4 {
         return 0.0;
     }
     let beats_per_step = 2.0;
     let step = (t * bpm.max(1.0) / 60.0 / beats_per_step) as u64;
-    // Major pentatonic in semitones.
-    const SCALE: [f64; 5] = [0.0, 2.0, 4.0, 7.0, 9.0];
-    // xorshift-like hash of (seed XOR step)
+    let scale = scale_for(scale_mode);
     let mut h = seed ^ step.wrapping_mul(0x9E37_79B9_7F4A_7C15);
     h ^= h >> 30;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^= h >> 27;
-    let idx = (h >> 32) as usize % SCALE.len();
-    SCALE[idx] * d
+    let idx = (h >> 32) as usize % scale.len();
+    scale[idx] * d
 }
 
 #[cfg(test)]

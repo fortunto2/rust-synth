@@ -127,14 +127,26 @@ fn supermass_send(amount: Shared) -> Net {
     dry & wet_scaled
 }
 
-fn stereo_gate_voiced(gain: Shared, mute: Shared, pulse_depth: Shared, bpm: Shared) -> Net {
+fn stereo_gate_voiced(
+    gain: Shared,
+    mute: Shared,
+    pulse_depth: Shared,
+    bpm: Shared,
+    life_mod: Shared,
+) -> Net {
     let raw = lfo(move |t: f64| {
         let g = (gain.value() * (1.0 - mute.value())) as f64;
         let depth = pulse_depth.value().clamp(0.0, 1.0) as f64;
         let pulse = pulse_sine(t, bpm.value() as f64);
-        g * (1.0 - depth + depth * pulse)
+        // Life mod: empty row → 0.4×, full row → 1.3× (continuous audio
+        // feedback so the blocks on the grid correspond to swelling /
+        // fading track energy). Smoothed by `follow(0.4)` below.
+        let life = life_mod.value().clamp(0.0, 1.0) as f64;
+        let life_scaled = 0.4 + 0.9 * life;
+        g * (1.0 - depth + depth * pulse) * life_scaled
     });
-    Net::wrap(Box::new(raw >> follow(0.08) >> split::<U2>()))
+    // 400 ms smoothing so beat-edge life_mod updates don't click.
+    Net::wrap(Box::new(raw >> follow(0.4) >> split::<U2>()))
 }
 
 // ── Pad ──
@@ -181,6 +193,7 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             p.mute.clone(),
             p.pulse_depth.clone(),
             g.bpm.clone(),
+            p.life_mod.clone(),
         )
 }
 
@@ -213,6 +226,7 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
             p.mute.clone(),
             p.pulse_depth.clone(),
             g.bpm.clone(),
+            p.life_mod.clone(),
         )
 }
 
@@ -237,6 +251,7 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             p.mute.clone(),
             p.pulse_depth.clone(),
             g.bpm.clone(),
+            p.life_mod.clone(),
         )
 }
 
@@ -265,5 +280,6 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
             p.mute.clone(),
             p.pulse_depth.clone(),
             g.bpm.clone(),
+            p.life_mod.clone(),
         )
 }

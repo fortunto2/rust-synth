@@ -17,6 +17,11 @@ pub struct TrackParams {
     pub pulse_depth: Shared,
     pub mute: Shared,
     pub freq: Shared,
+    /// Continuous Life-density modulation in [0.0, 1.0]. Updated every
+    /// beat by the TUI loop from `life.row_alive_count(i)`. Drives the
+    /// gate multiplier so tracks with dense rows swell and thinning
+    /// rows fade.
+    pub life_mod: Shared,
 }
 
 impl TrackParams {
@@ -33,6 +38,7 @@ impl TrackParams {
             pulse_depth: shared(0.0),
             mute: shared(0.0),
             freq: shared(freq),
+            life_mod: shared(1.0),
         }
     }
 
@@ -57,6 +63,7 @@ impl TrackParams {
             supermass: self.supermass.value(),
             pulse_depth: self.pulse_depth.value(),
             freq: self.freq.value(),
+            life_mod: self.life_mod.value(),
             muted: self.mute.value() > 0.5,
         }
     }
@@ -73,6 +80,7 @@ pub struct TrackSnapshot {
     pub supermass: f32,
     pub pulse_depth: f32,
     pub freq: f32,
+    pub life_mod: f32,
     pub muted: bool,
 }
 

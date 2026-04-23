@@ -33,7 +33,10 @@ use crate::{persistence, recording};
 
 const LIFE_ROWS: usize = 8;
 const LIFE_COLS: usize = 22;
-const DEFAULT_EVOLVE_PERIOD: u32 = 16;
+/// Beats between auto-evolve pulses. Shorter = more audible drift.
+const DEFAULT_EVOLVE_PERIOD: u32 = 8;
+/// Mutation strength when auto-evolve fires a weakest-row rewrite.
+const AUTO_EVOLVE_STRENGTH: f32 = 0.55;
 const STATUS_TTL: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -158,8 +161,6 @@ fn advance_beat_sync(app: &mut AppState, engine: &EngineHandle) {
     if cur_beat <= app.last_beat_index {
         return;
     }
-    // One or more beats elapsed — step that many times so Life does not
-    // lag if the UI was stalled.
     let steps = (cur_beat - app.last_beat_index).min(4) as usize;
     for _ in 0..steps {
         if app.coupling {
@@ -168,12 +169,51 @@ fn advance_beat_sync(app: &mut AppState, engine: &EngineHandle) {
         app.life.step();
     }
 
+    // ── Continuous Life → Audio coupling ──
+    // After stepping, push each row's density to its track's `life_mod`
+    // so the audible gate modulates in real time.
+    if app.coupling {
+        push_density_to_tracks(app, engine);
+    } else {
+        reset_life_mods(engine);
+    }
+
     if app.auto_evolve && cur_beat - app.last_evolve_beat >= app.evolve_period as i64 {
-        evolve_weakest(app, engine);
+        if let Some((name, before, after)) = evolve_weakest(app, engine) {
+            app.set_status(format!(
+                "evolved {name}: freq {before:.0}→{after:.0} Hz"
+            ));
+        }
         app.last_evolve_beat = cur_beat;
     }
 
     app.last_beat_index = cur_beat;
+}
+
+/// Map each row's live-cell ratio to its track's `life_mod` Shared.
+/// The gate formula in preset.rs multiplies by `0.4 + 0.9 · life_mod`,
+/// so dense rows get louder, empty rows fade to 40 %.
+fn push_density_to_tracks(app: &AppState, engine: &EngineHandle) {
+    let tracks = engine.tracks.lock();
+    for (i, track) in tracks.iter().enumerate() {
+        if i >= app.life.rows {
+            break;
+        }
+        let alive = app.life.row_alive_count(i);
+        let ratio = alive as f32 / app.life.cols as f32;
+        // A few alive cells already lift the row → square-root shaping
+        // so small densities produce audible lift.
+        let shaped = ratio.sqrt();
+        track.params.life_mod.set_value(shaped);
+    }
+}
+
+/// Coupling off → freeze life_mod at 1.0 so tracks play at nominal gain.
+fn reset_life_mods(engine: &EngineHandle) {
+    let tracks = engine.tracks.lock();
+    for t in tracks.iter() {
+        t.params.life_mod.set_value(1.0);
+    }
 }
 
 /// Seed Life cells from current audio state. One row per track; column
@@ -210,8 +250,9 @@ fn seed_from_audio(app: &mut AppState, engine: &EngineHandle, cur_beat: i64) {
 }
 
 /// Natural selection — find the unmuted track with the lowest row
-/// density and mutate it. "Weakest" track gets new genes.
-fn evolve_weakest(app: &mut AppState, engine: &EngineHandle) {
+/// density and mutate it. Returns (name, freq_before, freq_after) so the
+/// caller can show a status line — makes the "evolve" event visible.
+fn evolve_weakest(app: &mut AppState, engine: &EngineHandle) -> Option<(String, f32, f32)> {
     let tracks = engine.tracks.lock();
     let mut weakest: Option<(usize, usize)> = None;
     for (i, t) in tracks.iter().enumerate() {
@@ -228,10 +269,13 @@ fn evolve_weakest(app: &mut AppState, engine: &EngineHandle) {
             s => s,
         };
     }
-    if let Some((idx, _)) = weakest {
-        let genome = genome_of(&tracks[idx].params);
-        mutate(&genome, &mut app.rng_seed, 0.35);
-    }
+    let (idx, _) = weakest?;
+    let name = tracks[idx].name.clone();
+    let before = tracks[idx].params.freq.value();
+    let genome = genome_of(&tracks[idx].params);
+    mutate(&genome, &mut app.rng_seed, AUTO_EVOLVE_STRENGTH);
+    let after = tracks[idx].params.freq.value();
+    Some((name, before, after))
 }
 
 fn genome_of(p: &TrackParams) -> Genome<'_> {

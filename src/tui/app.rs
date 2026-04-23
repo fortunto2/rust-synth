@@ -30,7 +30,7 @@ use crate::math::harmony::{golden_pentatonic, rand_f32, rand_u32};
 use crate::math::life::Life;
 
 const LIFE_ROWS: usize = 8;
-const LIFE_COLS: usize = 32;
+const LIFE_COLS: usize = 22;
 const DEFAULT_EVOLVE_PERIOD: u32 = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -231,7 +231,7 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // header
-            Constraint::Length(11),     // tempo + life
+            Constraint::Length(10),     // tempo + life (8 rows data + 2 border)
             Constraint::Length(12),     // scope + trajectory
             Constraint::Min(10),        // tracks + params + formula
             Constraint::Length(3),      // help
@@ -255,7 +255,7 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
 
     let top = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .constraints([Constraint::Percentage(32), Constraint::Percentage(68)])
         .split(rows[1]);
     super::beats::render(f, top[0], engine);
     super::life::render(f, top[1], engine, app);

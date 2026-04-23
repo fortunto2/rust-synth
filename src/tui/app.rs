@@ -330,10 +330,10 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // header
-            Constraint::Length(10),     // life grid (full width)
-            Constraint::Length(7),      // pattern sequencer
-            Constraint::Length(12),     // scope + waveshape
-            Constraint::Min(16),        // tracks + params (13 rows) + formula
+            Constraint::Length(10),     // life (8 tracks + 2 border)
+            Constraint::Length(3),      // pattern (1 row + 2 border)
+            Constraint::Length(10),     // scope + waveshape
+            Constraint::Min(14),        // tracks + params + formula
             Constraint::Length(3),      // help
         ])
         .split(area);

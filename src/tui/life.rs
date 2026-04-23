@@ -39,8 +39,14 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         };
 
         let mut spans: Vec<Span<'static>> = Vec::with_capacity(life.cols + 3);
+        // Compact 3-char label: "Pad", "Bas", "Hrt", "Drn", "Shm", "Bll",
+        // "Sup", "Plk".  The colour alone identifies the preset kind;
+        // the short tag is just a hint when new users are learning the
+        // layout.  Saves ~7 chars of horizontal space per row so the
+        // whole grid + label comfortably fits 80-col terminals.
+        let short = short_tag(label);
         spans.push(Span::styled(
-            format!(" {:>9} ", label),
+            format!(" {short:<3} "),
             Style::default().fg(if muted { Color::DarkGray } else { color }),
         ));
 
@@ -86,6 +92,20 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         .title_style(Style::default().add_modifier(Modifier::BOLD));
     let para = Paragraph::new(lines).block(block);
     f.render_widget(para, area);
+}
+
+fn short_tag(label: &str) -> &'static str {
+    match label {
+        "Pad" => "Pad",
+        "Drone" => "Drn",
+        "Shimmer" => "Shm",
+        "Heartbeat" => "Hrt",
+        "Bass" => "Bas",
+        "Bell" => "Bll",
+        "SuperSaw" => "Sup",
+        "Pluck" => "Plk",
+        _ => "—",
+    }
 }
 
 fn color_for(kind: PresetKind) -> Color {

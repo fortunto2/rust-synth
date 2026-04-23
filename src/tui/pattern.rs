@@ -78,18 +78,10 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         }
     }
 
-    let hint = if is_drum {
-        " h/H hits ±1 · p/P rotate ±1 · R re-roll pattern "
-    } else {
-        " (select a Heartbeat track to see its step pattern) "
-    };
-
-    let body = vec![
-        Line::from(""),
-        Line::from(cells),
-        Line::from(""),
-        Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))),
-    ];
+    // Key hints live in the help line at the bottom — no need for a
+    // second copy inside this pane.  Title carries the useful info
+    // (track name · hits · rot) so the pane is a single row of cells.
+    let body = vec![Line::from(cells)];
 
     let block = Block::default()
         .borders(Borders::ALL)

@@ -601,7 +601,9 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
             let v = (p.cutoff.value() * factor).clamp(40.0, 12000.0);
             p.cutoff.set_value(v);
         }
-        2 => p.resonance.set_value((p.resonance.value() + 0.05 * sign).clamp(0.0, 1.0)),
+        // UI resonance range capped at 0.70 — above this the Moog
+        // self-oscillates into a sine-wave whistle at cutoff. Hard safety.
+        2 => p.resonance.set_value((p.resonance.value() + 0.05 * sign).clamp(0.0, 0.70)),
         3 => p.detune.set_value((p.detune.value() + 2.0 * sign).clamp(-50.0, 50.0)),
         4 => {
             let semitone = 2f32.powf(1.0 / 12.0);
@@ -638,7 +640,7 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     p.mute.set_value(0.0);
     p.gain.set_value(0.28 + 0.15 * rand_f32(&mut app.rng_seed).abs());
     p.cutoff.set_value(600.0 + 2500.0 * rand_f32(&mut app.rng_seed).abs());
-    p.resonance.set_value(0.15 + 0.35 * rand_f32(&mut app.rng_seed).abs());
+    p.resonance.set_value(0.15 + 0.30 * rand_f32(&mut app.rng_seed).abs());
     p.reverb_mix.set_value(0.45 + 0.45 * rand_f32(&mut app.rng_seed).abs());
     if matches!(track.kind, PresetKind::Heartbeat) {
         p.pulse_depth.set_value(0.0);
@@ -655,7 +657,7 @@ fn randomize_track(p: &TrackParams, seed: &mut u64) {
     let note = scale[(rand_u32(seed, scale.len() as u32)) as usize];
     p.freq.set_value(note);
     p.cutoff.set_value(500.0 + 3000.0 * rand_f32(seed).abs());
-    p.resonance.set_value(0.1 + 0.5 * rand_f32(seed).abs());
+    p.resonance.set_value(0.1 + 0.4 * rand_f32(seed).abs());
     p.reverb_mix.set_value(0.3 + 0.6 * rand_f32(seed).abs());
     p.pulse_depth.set_value(0.2 * rand_f32(seed).abs());
 }

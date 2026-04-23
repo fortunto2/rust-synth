@@ -197,7 +197,10 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         let wobble = 1.0 + 0.10 * (0.5 - 0.5 * (t * 0.08).sin());
         cut.value() as f64 * wobble
     }) >> follow(0.08);
-    let res_mod = lfo(move |_t: f64| res_s.value() as f64) >> follow(0.08);
+    // Hard cap at 0.65: above that the Moog self-oscillates into a
+    // sustained whistle at cutoff. We'd rather lose a tiny bit of range
+    // at the top than let auto-evolve park a track in squeal territory.
+    let res_mod = lfo(move |_t: f64| res_s.value().min(0.65) as f64) >> follow(0.08);
 
     // Tame pad whistle: fixed −3.5 dB shelf at 3 kHz before the reverb.
     // This kills the resonance that builds between detuned partials

@@ -40,7 +40,9 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     let items: [(&str, f32, String); 8] = [
         ("gain    ", s.gain,                              format!("{:>4.2}", s.gain)),
         ("cutoff  ", norm_log(s.cutoff, 40.0, 12000.0),   format!("{:>5.0} Hz", s.cutoff)),
-        ("resonance", s.resonance,                        format!("{:>4.2}", s.resonance)),
+        // Slider normalized to 0..0.70 since that's the hard cap in both
+        // UI and audio — whistle zone starts above that.
+        ("resonance", (s.resonance / 0.70).min(1.0),      format!("{:>4.2}", s.resonance)),
         ("detune  ", (s.detune + 50.0) / 100.0,           format!("{:>+3.0} ct", s.detune)),
         ("freq    ", norm_log(s.freq, 20.0, 880.0),       format!("{:>5.1} Hz", s.freq)),
         ("reverb  ", s.reverb_mix,                        format!("{:>4.2}", s.reverb_mix)),

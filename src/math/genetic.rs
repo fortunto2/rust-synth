@@ -41,8 +41,9 @@ pub fn mutate(g: &Genome, seed: &mut u64, strength: f32) {
     g.cutoff
         .set_value((g.cutoff.value() * cut_factor).clamp(40.0, 12000.0));
 
-    // Resonance, reverb_mix, pulse_depth — additive drift.
-    let res = (g.resonance.value() + s * 0.25 * rand_f32(seed)).clamp(0.0, 1.0);
+    // Resonance — additive drift, clamped well below Moog self-oscillation
+    // (≈ 0.7). Smaller perturbation too, so auto-evolve can't spike it.
+    let res = (g.resonance.value() + s * 0.15 * rand_f32(seed)).clamp(0.0, 0.55);
     g.resonance.set_value(res);
 
     let rev = (g.reverb_mix.value() + s * 0.25 * rand_f32(seed)).clamp(0.0, 1.0);

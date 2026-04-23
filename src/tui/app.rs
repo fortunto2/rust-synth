@@ -1,4 +1,14 @@
-//! Ratatui event loop + layout + key bindings (focus-mode).
+//! Ratatui event loop + key bindings + Life↔Audio coupling.
+//!
+//! Every beat boundary the loop does three things in order:
+//!   1. **Audio → Life**: seed cells in each unmuted track's row based on
+//!      its current amplitude; Heartbeat injects a glider.
+//!   2. **Life step**: Conway B3/S23, one generation.
+//!   3. **Life → Audio** (auto-evolve): every `evolve_period` beats, mutate
+//!      the unmuted track whose row has the lowest live-cell count
+//!      (fitness = row density).
+//!
+//! The user can disable coupling (`L`) or auto-evolve (`O`) at any time.
 
 use anyhow::Result;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent};
@@ -14,8 +24,14 @@ use std::time::{Duration, Instant};
 
 use crate::audio::engine::EngineHandle;
 use crate::audio::preset::PresetKind;
-use crate::audio::track::Track;
+use crate::audio::track::{Track, TrackParams};
+use crate::math::genetic::{crossover, mutate, Genome};
 use crate::math::harmony::{golden_pentatonic, rand_f32, rand_u32};
+use crate::math::life::Life;
+
+const LIFE_ROWS: usize = 8;
+const LIFE_COLS: usize = 32;
+const DEFAULT_EVOLVE_PERIOD: u32 = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
@@ -29,16 +45,33 @@ pub struct AppState {
     pub selected_param: usize,
     pub should_quit: bool,
     pub rng_seed: u64,
+
+    // ── Life + evolution ──
+    pub life: Life,
+    pub last_beat_index: i64,
+    pub last_evolve_beat: i64,
+    pub evolve_period: u32,
+    pub coupling: bool,
+    pub auto_evolve: bool,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let mut life = Life::random(LIFE_ROWS, LIFE_COLS, 0xBEEF_F00D, 0.22);
+        life.inject_glider(0, 0);
+        life.inject_glider(4, 10);
         Self {
             focus: Focus::Tracks,
             selected_track: 0,
             selected_param: 0,
             should_quit: false,
-            rng_seed: 0xC0FFEE_DEAD_BEEF,
+            rng_seed: 0x00C0_FFEE_DEAD_BEEF,
+            life,
+            last_beat_index: -1,
+            last_evolve_beat: 0,
+            evolve_period: DEFAULT_EVOLVE_PERIOD,
+            coupling: true,
+            auto_evolve: true,
         }
     }
 }
@@ -74,6 +107,8 @@ fn run_loop<B: ratatui::backend::Backend>(
     let mut last = Instant::now();
 
     loop {
+        // Advance Life/evolution on beat boundaries before drawing.
+        advance_beat_sync(&mut app, engine);
         terminal.draw(|f| ui(f, engine, &app))?;
 
         let timeout = tick.saturating_sub(last.elapsed());
@@ -91,34 +126,139 @@ fn run_loop<B: ratatui::backend::Backend>(
     }
 }
 
+// ─── Beat-synchronous Life step + coupling ──────────────────────────────
+
+fn advance_beat_sync(app: &mut AppState, engine: &EngineHandle) {
+    let t = engine.phase_clock.value();
+    let bpm = engine.global.bpm.value();
+    let cur_beat = (t * bpm / 60.0).floor() as i64;
+
+    if cur_beat <= app.last_beat_index {
+        return;
+    }
+    // One or more beats elapsed — step that many times so Life does not
+    // lag if the UI was stalled.
+    let steps = (cur_beat - app.last_beat_index).min(4) as usize;
+    for _ in 0..steps {
+        if app.coupling {
+            seed_from_audio(app, engine, cur_beat);
+        }
+        app.life.step();
+    }
+
+    if app.auto_evolve && cur_beat - app.last_evolve_beat >= app.evolve_period as i64 {
+        evolve_weakest(app, engine);
+        app.last_evolve_beat = cur_beat;
+    }
+
+    app.last_beat_index = cur_beat;
+}
+
+/// Seed Life cells from current audio state. One row per track; column
+/// follows beat phase so trails scroll across the grid.
+fn seed_from_audio(app: &mut AppState, engine: &EngineHandle, cur_beat: i64) {
+    let col = cur_beat.rem_euclid(app.life.cols as i64) as usize;
+    let tracks = engine.tracks.lock();
+    for (i, track) in tracks.iter().enumerate() {
+        if i >= app.life.rows {
+            break;
+        }
+        let p = &track.params;
+        if p.mute.value() > 0.5 {
+            continue;
+        }
+        let gain = p.gain.value();
+        // One cell per beat; extra for loud/heartbeat tracks so they seed
+        // gliders naturally.
+        app.life.set(i, col, true);
+        if gain > 0.45 {
+            app.life.set(i, (col + 1) % app.life.cols, true);
+        }
+        if matches!(track.kind, PresetKind::Heartbeat) {
+            // Inject a glider in this row around the current column.
+            let r0 = i.saturating_sub(1).min(app.life.rows.saturating_sub(3));
+            let c0 = (col + 2) % app.life.cols;
+            for (dr, dc) in [(0, 1), (1, 2), (2, 0), (2, 1), (2, 2)] {
+                let r = (r0 + dr).min(app.life.rows - 1);
+                let c = (c0 + dc) % app.life.cols;
+                app.life.set(r, c, true);
+            }
+        }
+    }
+}
+
+/// Natural selection — find the unmuted track with the lowest row
+/// density and mutate it. "Weakest" track gets new genes.
+fn evolve_weakest(app: &mut AppState, engine: &EngineHandle) {
+    let tracks = engine.tracks.lock();
+    let mut weakest: Option<(usize, usize)> = None;
+    for (i, t) in tracks.iter().enumerate() {
+        if i >= app.life.rows {
+            break;
+        }
+        if t.params.mute.value() > 0.5 {
+            continue;
+        }
+        let count = app.life.row_alive_count(i);
+        weakest = match weakest {
+            None => Some((i, count)),
+            Some((_, c)) if count < c => Some((i, count)),
+            s => s,
+        };
+    }
+    if let Some((idx, _)) = weakest {
+        let genome = genome_of(&tracks[idx].params);
+        mutate(&genome, &mut app.rng_seed, 0.35);
+    }
+}
+
+fn genome_of(p: &TrackParams) -> Genome<'_> {
+    Genome {
+        freq: &p.freq,
+        cutoff: &p.cutoff,
+        resonance: &p.resonance,
+        reverb_mix: &p.reverb_mix,
+        pulse_depth: &p.pulse_depth,
+    }
+}
+
+// ─── UI ─────────────────────────────────────────────────────────────────
+
 fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     let area = f.area();
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),       // header
-            Constraint::Length(7),       // beat grid
-            Constraint::Length(14),      // scope + trajectory
-            Constraint::Min(10),         // tracks + params + formula
-            Constraint::Length(3),       // help
+            Constraint::Length(3),      // header
+            Constraint::Length(11),     // tempo + life
+            Constraint::Length(12),     // scope + trajectory
+            Constraint::Min(10),        // tracks + params + formula
+            Constraint::Length(3),      // help
         ])
         .split(area);
 
     let header = Paragraph::new(format!(
-        " rust-synth · master {:>3.0}%  ·  peak L {:>4.2} R {:>4.2}  ·  SR {:.0} Hz  ·  t {:>6.1} s  ·  focus: {}",
+        " rust-synth · master {:>3.0}%  peak L{:>4.2} R{:>4.2}  SR{:.0}  t{:>6.1}s  ·  couple {}  evolve {}  gen {}",
         engine.global.master_gain.value() * 100.0,
         engine.peak_l.value(),
         engine.peak_r.value(),
         engine.sample_rate,
         engine.phase_clock.value(),
-        match app.focus { Focus::Tracks => "TRACKS", Focus::Params => "PARAMS" },
+        on_off(app.coupling),
+        on_off(app.auto_evolve),
+        app.life.generation,
     ))
     .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
     .block(Block::default().borders(Borders::ALL).title(" rust-synth "));
     f.render_widget(header, rows[0]);
 
-    super::beats::render(f, rows[1], engine);
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(rows[1]);
+    super::beats::render(f, top[0], engine);
+    super::life::render(f, top[1], engine, app);
 
     let mid = Layout::default()
         .direction(Direction::Horizontal)
@@ -140,16 +280,22 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓ track · Enter → params · a add · d kill · m mute · r rand · ,/. bpm · [/] master · q quit ",
-        Focus::Params => " ↑↓ param · ←→ adjust · Esc/Tab ← tracks · ,/. bpm · [/] master · q quit ",
+        Focus::Tracks => " ↑↓ track · Enter→params · a add · d kill · m mute · r rand · e/E mutate · x cross · L couple · O auto-evolve · ,/. bpm · [/] master · q quit ",
+        Focus::Params => " ↑↓ param · ←→ adjust · Esc/Tab ←tracks · e/E mutate · x cross · L/O toggle · ,/. bpm · [/] master · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
     f.render_widget(help, rows[4]);
 }
 
+fn on_off(b: bool) -> &'static str {
+    if b { "ON " } else { "off" }
+}
+
+// ─── Key handling ───────────────────────────────────────────────────────
+
 fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
-    // Global keys — work in any focus.
+    // Global keys.
     match key.code {
         KeyCode::Char('q') => {
             app.should_quit = true;
@@ -179,6 +325,32 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
             master_nudge(engine, 0.05);
             return;
         }
+        KeyCode::Char('L') => {
+            app.coupling = !app.coupling;
+            return;
+        }
+        KeyCode::Char('O') => {
+            app.auto_evolve = !app.auto_evolve;
+            return;
+        }
+        KeyCode::Char('e') => {
+            mutate_selected(app, engine, 0.3);
+            return;
+        }
+        KeyCode::Char('E') => {
+            mutate_all_active(app, engine, 0.25);
+            return;
+        }
+        KeyCode::Char('x') => {
+            crossover_with_neighbor(app, engine);
+            return;
+        }
+        KeyCode::Char('R') => {
+            // Re-seed Life from scratch with a new random + glider.
+            app.life = Life::random(LIFE_ROWS, LIFE_COLS, app.rng_seed, 0.22);
+            app.life.inject_glider(0, 4);
+            return;
+        }
         _ => {}
     }
 
@@ -205,11 +377,7 @@ fn handle_tracks_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
         KeyCode::Enter | KeyCode::Right | KeyCode::Tab => {
             app.focus = Focus::Params;
         }
-        KeyCode::Char('m') => {
-            let p = &tracks[app.selected_track].params;
-            let v = if p.mute.value() > 0.5 { 0.0 } else { 1.0 };
-            p.mute.set_value(v);
-        }
+        KeyCode::Char('m') => toggle_mute(&tracks[app.selected_track]),
         KeyCode::Char('a') => {
             drop(tracks);
             activate_next(engine, app);
@@ -235,9 +403,7 @@ fn handle_params_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
     let n_params = 7;
 
     match key.code {
-        KeyCode::Esc | KeyCode::Tab => {
-            app.focus = Focus::Tracks;
-        }
+        KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => app.focus = Focus::Tracks,
         KeyCode::Up => {
             if app.selected_param > 0 {
                 app.selected_param -= 1;
@@ -250,16 +416,16 @@ fn handle_params_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
         }
         KeyCode::Left => adjust(track, app, -1.0),
         KeyCode::Right => adjust(track, app, 1.0),
-        KeyCode::Char('m') => {
-            let p = &track.params;
-            let v = if p.mute.value() > 0.5 { 0.0 } else { 1.0 };
-            p.mute.set_value(v);
-        }
-        KeyCode::Char('r') => {
-            randomize_track(&track.params, &mut app.rng_seed);
-        }
+        KeyCode::Char('m') => toggle_mute(track),
+        KeyCode::Char('r') => randomize_track(&track.params, &mut app.rng_seed),
         _ => {}
     }
+}
+
+fn toggle_mute(track: &Track) {
+    let p = &track.params;
+    let v = if p.mute.value() > 0.5 { 0.0 } else { 1.0 };
+    p.mute.set_value(v);
 }
 
 fn master_nudge(engine: &EngineHandle, delta: f32) {
@@ -276,7 +442,6 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
     let p = &track.params;
     match app.selected_param {
         0 => p.gain.set_value((p.gain.value() + 0.05 * sign).clamp(0.0, 1.0)),
-        // Exponential cutoff step — perceptually linear, ×1.12 per press.
         1 => {
             let factor = if sign > 0.0 { 1.12 } else { 1.0 / 1.12 };
             let v = (p.cutoff.value() * factor).clamp(40.0, 12000.0);
@@ -284,7 +449,6 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
         }
         2 => p.resonance.set_value((p.resonance.value() + 0.05 * sign).clamp(0.0, 1.0)),
         3 => p.detune.set_value((p.detune.value() + 2.0 * sign).clamp(-50.0, 50.0)),
-        // Freq: semitone step (ratio 2^(1/12)).
         4 => {
             let semitone = 2f32.powf(1.0 / 12.0);
             let factor = if sign > 0.0 { semitone } else { 1.0 / semitone };
@@ -297,7 +461,6 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
     }
 }
 
-/// Activate the next muted slot with a golden-pentatonic root.
 fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     let tracks = engine.tracks.lock();
     let root = tracks
@@ -315,7 +478,6 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
         return;
     };
     let p = &track.params;
-
     let note = scale[(rand_u32(&mut app.rng_seed, scale.len() as u32)) as usize];
     p.freq.set_value(note);
     p.mute.set_value(0.0);
@@ -328,12 +490,11 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     } else {
         p.pulse_depth.set_value(0.2 * rand_f32(&mut app.rng_seed).abs());
     }
-
     app.selected_track = idx;
     app.focus = Focus::Params;
 }
 
-fn randomize_track(p: &crate::audio::track::TrackParams, seed: &mut u64) {
+fn randomize_track(p: &TrackParams, seed: &mut u64) {
     let root = p.freq.value();
     let scale = golden_pentatonic(root);
     let note = scale[(rand_u32(seed, scale.len() as u32)) as usize];
@@ -342,4 +503,34 @@ fn randomize_track(p: &crate::audio::track::TrackParams, seed: &mut u64) {
     p.resonance.set_value(0.1 + 0.5 * rand_f32(seed).abs());
     p.reverb_mix.set_value(0.3 + 0.6 * rand_f32(seed).abs());
     p.pulse_depth.set_value(0.2 * rand_f32(seed).abs());
+}
+
+fn mutate_selected(app: &mut AppState, engine: &EngineHandle, strength: f32) {
+    let tracks = engine.tracks.lock();
+    if let Some(track) = tracks.get(app.selected_track) {
+        let genome = genome_of(&track.params);
+        mutate(&genome, &mut app.rng_seed, strength);
+    }
+}
+
+fn mutate_all_active(app: &mut AppState, engine: &EngineHandle, strength: f32) {
+    let tracks = engine.tracks.lock();
+    for t in tracks.iter() {
+        if t.params.mute.value() < 0.5 {
+            let genome = genome_of(&t.params);
+            mutate(&genome, &mut app.rng_seed, strength);
+        }
+    }
+}
+
+fn crossover_with_neighbor(app: &mut AppState, engine: &EngineHandle) {
+    let tracks = engine.tracks.lock();
+    if tracks.len() < 2 {
+        return;
+    }
+    let me = app.selected_track;
+    let other = (me + 1) % tracks.len();
+    let a = genome_of(&tracks[me].params);
+    let b = genome_of(&tracks[other].params);
+    crossover(&a, &b, &mut app.rng_seed);
 }

@@ -1,6 +1,7 @@
 pub mod app;
 pub mod beats;
 pub mod formula;
+pub mod life;
 pub mod params;
 pub mod tracks;
 pub mod trajectory;

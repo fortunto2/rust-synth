@@ -31,8 +31,10 @@ cd rust-synth
 cargo run --release
 ```
 
-![rust-synth](docs/screenshot.png)
-<!-- drop a screenshot here once you have one -->
+![rust-synth TUI](docs/screenshot.png)
+
+*Header · tempo + life grid · 16-step pattern · scope + 16-second
+trajectory · tracks + 11-param sliders + live formula.*
 
 ## What it does
 

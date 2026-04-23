@@ -69,23 +69,46 @@ pub fn shelf_gain_db(g: f64) -> f64 {
     20.0 * g.max(1e-6).log10()
 }
 
-/// Stereo master bus: per-channel variable high-shelf at 3.5 kHz, then
-/// soft limiter. At brightness = 1.0 the shelf is 0 dB (passthrough)
-/// and only the limiter catches runaway reverb peaks.
+/// Map brightness to the master lowpass cutoff (Hz).
+/// 0 → 3000 Hz (hard cut of reverb HF resonances)
+/// 0.6 → ~8.6 kHz (default — mellow)
+/// 1.0 → 18 kHz (effective bypass)
+#[inline]
+pub fn brightness_to_lp_cutoff(b: f64) -> f64 {
+    3000.0 * 6.0_f64.powf(b.clamp(0.0, 1.0))
+}
+
+/// Stereo master bus: per-channel **high-shelf** (tilt) → **lowpass**
+/// (hard cut) → limiter. Both EQ stages driven by the same `brightness`.
+///
+/// Why two stages? Shelf gives the tonal character ("dark vs bright")
+/// while keeping mids full. Lowpass actually *removes* the 3–8 kHz
+/// reverb/chorus resonance buildup that otherwise still leaks through
+/// a shelf. Turn brightness fully up and both become passthrough.
 pub fn master_bus(brightness: Shared) -> Net {
-    let b_l = brightness.clone();
-    let b_r = brightness;
+    let b_shelf_l = brightness.clone();
+    let b_shelf_r = brightness.clone();
+    let b_lp_l = brightness.clone();
+    let b_lp_r = brightness;
 
-    let freq_l = lfo(|_t: f64| MASTER_SHELF_HZ);
-    let freq_r = lfo(|_t: f64| MASTER_SHELF_HZ);
-    let q_l = lfo(|_t: f64| 0.7_f64);
-    let q_r = lfo(|_t: f64| 0.7_f64);
-    let gain_l = lfo(move |_t: f64| brightness_to_shelf_gain(b_l.value() as f64));
-    let gain_r = lfo(move |_t: f64| brightness_to_shelf_gain(b_r.value() as f64));
+    // ── Shelf stage ──
+    let sh_f_l = lfo(|_t: f64| MASTER_SHELF_HZ);
+    let sh_f_r = lfo(|_t: f64| MASTER_SHELF_HZ);
+    let sh_q_l = lfo(|_t: f64| 0.7_f64);
+    let sh_q_r = lfo(|_t: f64| 0.7_f64);
+    let sh_g_l = lfo(move |_t: f64| brightness_to_shelf_gain(b_shelf_l.value() as f64));
+    let sh_g_r = lfo(move |_t: f64| brightness_to_shelf_gain(b_shelf_r.value() as f64));
+    let shelf_l = (pass() | sh_f_l | sh_q_l | sh_g_l) >> highshelf();
+    let shelf_r = (pass() | sh_f_r | sh_q_r | sh_g_r) >> highshelf();
 
-    // Per-channel: (audio | freq | q | gain) >> highshelf ⇒ 1 in → 1 out.
-    let left = (pass() | freq_l | q_l | gain_l) >> highshelf();
-    let right = (pass() | freq_r | q_r | gain_r) >> highshelf();
+    // ── Lowpass stage ──
+    let lp_c_l = lfo(move |_t: f64| brightness_to_lp_cutoff(b_lp_l.value() as f64));
+    let lp_c_r = lfo(move |_t: f64| brightness_to_lp_cutoff(b_lp_r.value() as f64));
+    let lp_q_l = lfo(|_t: f64| 0.5_f64);
+    let lp_q_r = lfo(|_t: f64| 0.5_f64);
+
+    let left = shelf_l >> (pass() | lp_c_l | lp_q_l) >> lowpass();
+    let right = shelf_r >> (pass() | lp_c_r | lp_q_r) >> lowpass();
     let stereo = left | right;
 
     let chain = stereo >> limiter_stereo(0.001, 0.3);
@@ -118,9 +141,11 @@ fn supermass_send(amount: Shared) -> Net {
     let amount_r = lfo(move |_t: f64| a2.value() as f64);
     let amount_stereo = Net::wrap(Box::new(amount_l | amount_r));
 
-    let effect = reverb_stereo(35.0, 15.0, 0.80)
+    // 2nd reverb damping bumped 0.72 → 0.90 so a 28-second T60 does not
+    // accumulate endless 4–8 kHz resonances in the tail.
+    let effect = reverb_stereo(35.0, 15.0, 0.88)
         >> (chorus(3, 0.0, 0.022, 0.28) | chorus(4, 0.0, 0.026, 0.28))
-        >> reverb_stereo(50.0, 28.0, 0.72);
+        >> reverb_stereo(50.0, 28.0, 0.90);
 
     let wet_scaled = Net::wrap(Box::new(effect)) * amount_stereo;
     let dry = Net::wrap(Box::new(multipass::<U2>()));

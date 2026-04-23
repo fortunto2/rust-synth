@@ -267,12 +267,13 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     };
     let status_text = app.current_status().map(|s| format!(" · {s}")).unwrap_or_default();
     let brightness = engine.global.brightness.value();
-    let cutoff_hz = crate::audio::preset::brightness_to_cutoff(brightness as f64);
+    let shelf_gain = crate::audio::preset::brightness_to_shelf_gain(brightness as f64);
+    let shelf_db = crate::audio::preset::shelf_gain_db(shelf_gain);
     let header_text = format!(
-        " rust-synth · mstr {:>3.0}%  brt {:>3.0}% (≈{:>5.0}Hz)  peak L{:>4.2} R{:>4.2}  couple {} evolve {} gen {}{}{}",
+        " rust-synth · mstr {:>3.0}%  brt {:>3.0}% ({:>+5.1} dB @ 3.5k)  peak L{:>4.2} R{:>4.2}  couple {} evolve {} gen {}{}{}",
         engine.global.master_gain.value() * 100.0,
         brightness * 100.0,
-        cutoff_hz,
+        shelf_db,
         engine.peak_l.value(),
         engine.peak_r.value(),
         on_off(app.coupling),

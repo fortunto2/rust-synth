@@ -1,4 +1,4 @@
-//! Track list widget with mute/solo indicators.
+//! Track list widget — gain bars + mute/active state.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -16,26 +16,31 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         .map(|(i, t)| {
             let snap = t.params.snapshot();
             let marker = if i == app.selected_track { "▶" } else { " " };
-            let mute = if snap.muted { "M" } else { "·" };
-            let gain_bar = bar(snap.gain, 10);
+            let status = if snap.muted { "·" } else { "●" };
+            let gain_bar = bar(snap.gain * (if snap.muted { 0.0 } else { 1.0 }), 10);
             let line = format!(
-                "{marker} {mute} {name:<14} gain {bar} {g:>3.0}%",
+                "{marker} {status} {name:<14} {bar} {f:>5.1}Hz",
                 name = t.name,
                 bar = gain_bar,
-                g = snap.gain * 100.0
+                f = snap.freq,
             );
             let style = if i == app.selected_track {
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else if snap.muted {
                 Style::default().fg(Color::DarkGray)
             } else {
-                Style::default()
+                Style::default().fg(Color::White)
             };
             ListItem::new(line).style(style)
         })
         .collect();
 
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" tracks "));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" tracks ")
+            .title_style(Style::default().add_modifier(Modifier::BOLD)),
+    );
     f.render_widget(list, area);
 }
 

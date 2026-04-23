@@ -1,5 +1,9 @@
+pub mod harmony;
+pub mod pulse;
 pub mod rnd;
 pub mod sigmoid;
 
+pub use harmony::{fold_octave, golden_freq, golden_pentatonic, rand_f32, rand_u32, PHI};
+pub use pulse::{beat_phase, phrase_phase, pulse_decay, pulse_sine};
 pub use rnd::{brown_walk, perlin1d, value_noise};
 pub use sigmoid::{ease_in_out, sigmoid, smoothstep, softexp};

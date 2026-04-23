@@ -1,11 +1,9 @@
 //! Offline WAV render — deterministic, no audio device.
-//!
-//! Mirrors the TUI's default track set for `make integration` smoke tests.
 
 use anyhow::{Context, Result};
 use fundsp::hacker32::*;
 use hound::{SampleFormat, WavSpec, WavWriter};
-use rust_synth::audio::preset::{Preset, PresetKind};
+use rust_synth::audio::preset::{GlobalParams, Preset, PresetKind};
 use rust_synth::audio::track::TrackParams;
 use std::path::PathBuf;
 
@@ -39,15 +37,20 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn build_demo_graph() -> Box<dyn AudioUnit> {
-    let pad = TrackParams::default();
-    let drone = TrackParams::default();
-    drone.gain.set_value(0.35);
-    drone.reverb_mix.set_value(0.7);
+fn build_demo_graph() -> Net {
+    let g = GlobalParams::default();
 
-    let a = Preset::build(PresetKind::PadZimmer, 55.0, &pad);
-    let b = Preset::build(PresetKind::DroneSub, 55.0, &drone);
-    Box::new((a + b) * 0.7)
+    let pad = TrackParams::default_for(55.0);
+    let drone = TrackParams::default_for(34.0);
+    drone.gain.set_value(0.32);
+    drone.reverb_mix.set_value(0.7);
+    let heart = TrackParams::default_for(55.0);
+    heart.gain.set_value(0.5);
+
+    let a = Preset::build(PresetKind::PadZimmer, &pad, &g);
+    let b = Preset::build(PresetKind::DroneSub, &drone, &g);
+    let c = Preset::build(PresetKind::Heartbeat, &heart, &g);
+    (a + b + c) * 0.6
 }
 
 struct Args {

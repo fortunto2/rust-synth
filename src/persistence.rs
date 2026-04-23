@@ -19,7 +19,13 @@ pub struct PresetFile {
     pub name: String,
     pub bpm: f32,
     pub master_gain: f32,
+    #[serde(default = "default_brightness")]
+    pub brightness: f32,
     pub tracks: Vec<TrackPreset>,
+}
+
+fn default_brightness() -> f32 {
+    0.7
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -49,6 +55,7 @@ pub fn save(dir: &Path, engine: &EngineHandle) -> Result<PathBuf> {
         name: name.clone(),
         bpm: engine.global.bpm.value(),
         master_gain: engine.global.master_gain.value(),
+        brightness: engine.global.brightness.value(),
         tracks: tracks_guard
             .iter()
             .map(|t| {
@@ -85,6 +92,7 @@ pub fn load(path: &Path, engine: &EngineHandle) -> Result<usize> {
 
     engine.global.bpm.set_value(preset.bpm.clamp(20.0, 200.0));
     engine.global.master_gain.set_value(preset.master_gain.clamp(0.0, 1.5));
+    engine.global.brightness.set_value(preset.brightness.clamp(0.0, 1.0));
 
     let tracks_guard = engine.tracks.lock();
     let mut applied = 0;

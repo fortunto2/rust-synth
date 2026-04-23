@@ -266,12 +266,15 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         "".to_string()
     };
     let status_text = app.current_status().map(|s| format!(" · {s}")).unwrap_or_default();
+    let brightness = engine.global.brightness.value();
+    let cutoff_hz = crate::audio::preset::brightness_to_cutoff(brightness as f64);
     let header_text = format!(
-        " rust-synth · master {:>3.0}%  peak L{:>4.2} R{:>4.2}  t{:>6.1}s  couple {} evolve {} gen {}{}{}",
+        " rust-synth · mstr {:>3.0}%  brt {:>3.0}% (≈{:>5.0}Hz)  peak L{:>4.2} R{:>4.2}  couple {} evolve {} gen {}{}{}",
         engine.global.master_gain.value() * 100.0,
+        brightness * 100.0,
+        cutoff_hz,
         engine.peak_l.value(),
         engine.peak_r.value(),
-        engine.phase_clock.value(),
         on_off(app.coupling),
         on_off(app.auto_evolve),
         app.life.generation,
@@ -315,8 +318,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · r rand · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · [/] mstr · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · [/] mstr · q quit ",
+        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · r rand · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · {/} brt · [/] mstr · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · {/} brt · [/] mstr · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
@@ -364,6 +367,14 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
         }
         KeyCode::Char(']') => {
             master_nudge(engine, 0.05);
+            return;
+        }
+        KeyCode::Char('{') => {
+            brightness_nudge(engine, -0.05);
+            return;
+        }
+        KeyCode::Char('}') => {
+            brightness_nudge(engine, 0.05);
             return;
         }
         KeyCode::Char('L') => {
@@ -526,6 +537,11 @@ fn master_nudge(engine: &EngineHandle, delta: f32) {
 fn bpm_nudge(engine: &EngineHandle, delta: f32) {
     let v = (engine.global.bpm.value() + delta).clamp(20.0, 200.0);
     engine.global.bpm.set_value(v);
+}
+
+fn brightness_nudge(engine: &EngineHandle, delta: f32) {
+    let v = (engine.global.brightness.value() + delta).clamp(0.0, 1.0);
+    engine.global.brightness.set_value(v);
 }
 
 fn adjust(track: &Track, app: &AppState, sign: f32) {

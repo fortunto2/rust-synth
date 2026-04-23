@@ -33,6 +33,13 @@ impl PresetKind {
 pub struct GlobalParams {
     pub bpm: Shared,
     pub master_gain: Shared,
+    /// Master tone tilt in [0.0, 1.0]. Drives a stereo lowpass on the
+    /// master bus: `cutoff = 1500 · 12^brightness` Hz.
+    ///   0.0 → 1.5 kHz (very dark)
+    ///   0.5 → ~5.2 kHz (mellow)
+    ///   0.7 → ~8.7 kHz (default — tames reverb resonances)
+    ///   1.0 → 18 kHz (effectively bypass)
+    pub brightness: Shared,
 }
 
 impl Default for GlobalParams {
@@ -40,8 +47,41 @@ impl Default for GlobalParams {
         Self {
             bpm: shared(72.0),
             master_gain: shared(0.7),
+            brightness: shared(0.7),
         }
     }
+}
+
+/// Map brightness [0..1] → lowpass cutoff Hz on an exponential curve.
+#[inline]
+pub fn brightness_to_cutoff(b: f64) -> f64 {
+    let b = b.clamp(0.0, 1.0);
+    1500.0 * 12.0_f64.powf(b)
+}
+
+/// Stereo master bus: variable lowpass (driven by `brightness`) → soft
+/// stereo limiter. Takes master sum (2 in) and produces the final output
+/// (2 out) that actually reaches cpal.
+///
+/// Built so that at `brightness = 1.0` the lowpass is essentially bypass
+/// and the only processing left is the limiter catching runaway peaks.
+pub fn master_bus(brightness: Shared) -> Net {
+    let b1 = brightness.clone();
+    let b2 = brightness;
+    let cutoff_l = lfo(move |_t: f64| brightness_to_cutoff(b1.value() as f64));
+    let cutoff_r = lfo(move |_t: f64| brightness_to_cutoff(b2.value() as f64));
+    let q_l = lfo(|_t: f64| 0.5_f64);
+    let q_r = lfo(|_t: f64| 0.5_f64);
+
+    // Per-channel: (signal | cutoff | q) >> lowpass ⇒ 1 in → 1 out.
+    let left = (pass() | cutoff_l | q_l) >> lowpass();
+    let right = (pass() | cutoff_r | q_r) >> lowpass();
+    let stereo_lp = left | right;
+
+    // Limiter smooths peaks without dulling transient detail. Attack 1 ms,
+    // release 300 ms — transparent on ambient material.
+    let chain = stereo_lp >> limiter_stereo(0.001, 0.3);
+    Net::wrap(Box::new(chain))
 }
 
 pub struct Preset;

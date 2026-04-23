@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use super::preset::{GlobalParams, Preset, PresetKind};
+use super::preset::{master_bus, GlobalParams, Preset, PresetKind};
 use super::track::Track;
 use crate::math::harmony::golden_freq;
 use crate::recording::RecorderState;
@@ -99,15 +99,20 @@ impl AudioEngine {
 }
 
 fn build_master(tracks: &[Track], g: &GlobalParams) -> Net {
-    let mut master: Option<Net> = None;
+    let mut summed: Option<Net> = None;
     for t in tracks {
         let node = Preset::build(t.kind, &t.params, g);
-        master = Some(match master {
+        summed = Some(match summed {
             Some(acc) => acc + node,
             None => node,
         });
     }
-    master.unwrap_or_else(|| Net::wrap(Box::new(zero() | zero())))
+    let summed = summed.unwrap_or_else(|| Net::wrap(Box::new(zero() | zero())));
+
+    // Pipe the stereo sum through the master bus (variable lowpass +
+    // soft limiter). This is where "highs punch" gets tamed before the
+    // signal reaches cpal.
+    summed >> master_bus(g.brightness.clone())
 }
 
 #[allow(clippy::too_many_arguments)]

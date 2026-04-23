@@ -327,10 +327,10 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // header
-            Constraint::Length(10),     // tempo + life
-            Constraint::Length(7),      // pattern sequencer (1 row data + title/hint)
-            Constraint::Length(12),     // scope + trajectory
-            Constraint::Min(10),        // tracks + params + formula
+            Constraint::Length(10),     // life grid (full width)
+            Constraint::Length(7),      // pattern sequencer
+            Constraint::Length(12),     // scope + waveshape
+            Constraint::Min(16),        // tracks + params (13 rows) + formula
             Constraint::Length(3),      // help
         ])
         .split(area);
@@ -370,12 +370,9 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .block(Block::default().borders(Borders::ALL).title(" rust-synth "));
     f.render_widget(header, rows[0]);
 
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(32), Constraint::Percentage(68)])
-        .split(rows[1]);
-    super::beats::render(f, top[0], engine);
-    super::life::render(f, top[1], engine, app);
+    // Life grid takes the whole width now — the old tempo pane duplicated
+    // the play-head info and confused things.
+    super::life::render(f, rows[1], engine, app);
 
     super::pattern::render(f, rows[2], engine, app);
 

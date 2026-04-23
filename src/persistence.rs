@@ -177,5 +177,6 @@ fn kind_to_str(k: PresetKind) -> &'static str {
         PresetKind::Shimmer => "Shimmer",
         PresetKind::Heartbeat => "Heartbeat",
         PresetKind::BassPulse => "BassPulse",
+        PresetKind::Bell => "Bell",
     }
 }

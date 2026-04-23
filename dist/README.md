@@ -5,12 +5,36 @@ drones, kick patterns and evolving textures — driven by math formulas
 (sigmoid, perlin, euclidean, golden ratio, game of life) inside FunDSP
 closures. No GUI, no DAW. Ratatui TUI on top of cpal audio output.
 
+## Install
+
+### crates.io (any platform with Rust)
+
+```sh
+cargo install rust-synth
+rust-synth
 ```
+
+[![Crates.io](https://img.shields.io/crates/v/rust-synth.svg)](https://crates.io/crates/rust-synth)
+
+### macOS — Homebrew (Apple Silicon prebuilt, other platforms build from source)
+
+```sh
+brew install fortunto2/tap/rust-synth        # arm64 bottle
+brew install --head fortunto2/tap/rust-synth  # build latest main
+```
+
+### Clone + run
+
+```sh
+git clone https://github.com/fortunto2/rust-synth
+cd rust-synth
 cargo run --release
 ```
 
-![rust-synth](docs/screenshot.png)
-<!-- drop a screenshot here once you have one -->
+![rust-synth TUI](docs/screenshot.png)
+
+*Header · tempo + life grid · 16-step pattern · scope + 16-second
+trajectory · tracks + 11-param sliders + live formula.*
 
 ## What it does
 

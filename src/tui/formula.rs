@@ -144,6 +144,28 @@ fn lines_for(kind: PresetKind, s: &crate::audio::track::TrackSnapshot, bpm: f32)
                 Span::styled(format!("{:.2}", s.gain), key),
             ]));
         }
+        PresetKind::Bell => {
+            out.push(Line::from(Span::styled("2-operator FM bell:", hi)));
+            out.push(Line::from(Span::styled(
+                "  mod(t) = sin(2π · f·2.76 · t) · (q · 450)",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "  bell(t) = sin(2π · (f + mod(t)) · t)",
+                hi,
+            )));
+            out.push(Line::from(""));
+            out.push(Line::from(Span::styled(
+                "y = bell · (0.85 + 0.15·sin_pulse(bpm/4)) · 0.30 ⇒ hall(25m, 8s)",
+                hi,
+            )));
+            out.push(Line::from(vec![
+                Span::styled("  FM depth (q) = ", dim),
+                Span::styled(format!("{:.2}", s.resonance.min(0.65)), key),
+                Span::styled("  gain = ", dim),
+                Span::styled(format!("{:.2}", s.gain), key),
+            ]));
+        }
         PresetKind::BassPulse => {
             out.push(Line::from(Span::styled(
                 "osc = 0.55·sin(2π·f·t) + 0.22·sin(4π·f·t) + 0.35·sin(π·f·t)",

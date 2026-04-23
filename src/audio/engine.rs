@@ -27,6 +27,7 @@ pub const SCOPE_CAPACITY: usize = 512;
 pub const SCOPE_DECIMATION: usize = 32;
 
 pub type ScopeBuffer = Arc<Mutex<VecDeque<(f32, f32)>>>;
+pub type SharedGraph = Arc<Mutex<Net>>;
 
 /// Handle the TUI keeps alive for the lifetime of the app.
 pub struct EngineHandle {
@@ -38,6 +39,11 @@ pub struct EngineHandle {
     pub scope: ScopeBuffer,
     pub phase_clock: Shared,
     pub recorder: Arc<RecorderState>,
+    /// Master DSP graph. Exposed behind a mutex so the TUI can swap it
+    /// wholesale when the user changes a track's preset kind at runtime.
+    /// Lock contention is tiny: audio callback holds it for one buffer
+    /// (~10 ms at 48 kHz / 512-sample buffer) and UI rebuilds take ~5 ms.
+    graph: SharedGraph,
     _stream: Stream,
 }
 
@@ -69,13 +75,14 @@ impl AudioEngine {
 
         let mut graph = build_master(&tracks.lock(), &global);
         graph.set_sample_rate(sample_rate as f64);
+        let graph: SharedGraph = Arc::new(Mutex::new(graph));
 
         let stream = start_stream(
             device,
             config,
             channels,
             sample_rate,
-            graph,
+            graph.clone(),
             global.master_gain.clone(),
             peak_l.clone(),
             peak_r.clone(),
@@ -93,8 +100,26 @@ impl AudioEngine {
             scope,
             phase_clock,
             recorder,
+            graph,
             _stream: stream,
         })
+    }
+}
+
+impl EngineHandle {
+    /// Rebuild the master DSP graph from the current track list. Call
+    /// this after mutating any `track.kind`. Cheap enough for live use —
+    /// the audio callback sees the new graph on its next buffer.
+    ///
+    /// NB: the old graph's internal state (reverb tails, oscillator
+    /// phases) is discarded. There's a small audible discontinuity
+    /// during preset swaps; acceptable given how rarely kind changes.
+    pub fn rebuild_graph(&self) {
+        let tracks = self.tracks.lock();
+        let mut new_graph = build_master(&tracks, &self.global);
+        drop(tracks);
+        new_graph.set_sample_rate(self.sample_rate as f64);
+        *self.graph.lock() = new_graph;
     }
 }
 
@@ -121,7 +146,7 @@ fn start_stream(
     config: StreamConfig,
     channels: usize,
     sample_rate: f32,
-    mut graph: Net,
+    graph: SharedGraph,
     master: Shared,
     peak_l: Shared,
     peak_r: Shared,
@@ -133,8 +158,6 @@ fn start_stream(
     let mut env_l = 0.0f32;
     let mut env_r = 0.0f32;
     let fall = 0.9995f32;
-    // f64 accumulator — precise for hours, avoids the f32 drift that
-    // causes sub-rate LFOs to alias after ~5 minutes at 48 kHz.
     let dt: f64 = 1.0 / sample_rate as f64;
     let mut t: f64 = 0.0;
     let mut decim = 0usize;
@@ -145,11 +168,12 @@ fn start_stream(
             let m = master.value();
             let mut pending: [(f32, f32); 32] = [(0.0, 0.0); 32];
             let mut pending_n = 0usize;
+            // Lock the shared graph for the whole buffer — a few µs
+            // longer than per-sample locking, but no extra cost.
+            let mut graph = graph.lock();
 
             for frame in data.chunks_mut(channels) {
                 let (lo, ro) = graph.get_stereo();
-                // hacker uses f64 internally (time counter precise for
-                // hours); get_stereo downcasts to f32 at the boundary.
                 let l = lo * m;
                 let r = ro * m;
                 env_l = (env_l * fall).max(l.abs());

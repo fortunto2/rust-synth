@@ -20,7 +20,18 @@ pub enum PresetKind {
     Shimmer,
     Heartbeat,
     BassPulse,
+    Bell,
 }
+
+/// All preset kinds in cycle order. Used by the TUI `t` / `T` keys.
+pub const ALL_KINDS: [PresetKind; 6] = [
+    PresetKind::PadZimmer,
+    PresetKind::BassPulse,
+    PresetKind::Heartbeat,
+    PresetKind::DroneSub,
+    PresetKind::Shimmer,
+    PresetKind::Bell,
+];
 
 impl PresetKind {
     pub fn label(self) -> &'static str {
@@ -30,7 +41,18 @@ impl PresetKind {
             PresetKind::Shimmer => "Shimmer",
             PresetKind::Heartbeat => "Heartbeat",
             PresetKind::BassPulse => "Bass",
+            PresetKind::Bell => "Bell",
         }
+    }
+
+    pub fn next(self) -> Self {
+        let i = ALL_KINDS.iter().position(|&k| k == self).unwrap_or(0);
+        ALL_KINDS[(i + 1) % ALL_KINDS.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let i = ALL_KINDS.iter().position(|&k| k == self).unwrap_or(0);
+        ALL_KINDS[(i + ALL_KINDS.len() - 1) % ALL_KINDS.len()]
     }
 }
 
@@ -130,6 +152,7 @@ impl Preset {
             PresetKind::Shimmer => shimmer(p, g),
             PresetKind::Heartbeat => heartbeat(p, g),
             PresetKind::BassPulse => bass_pulse(p, g),
+            PresetKind::Bell => bell_preset(p, g),
         }
     }
 }
@@ -540,6 +563,50 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
     let grooved = filtered * groove;
 
     let stereo = grooved >> split::<U2>() >> reverb_stereo(14.0, 2.5, 0.88);
+
+    let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
+    voiced
+        * stereo_gate_voiced(
+            p.gain.clone(),
+            p.mute.clone(),
+            p.pulse_depth.clone(),
+            g.bpm.clone(),
+            p.life_mod.clone(),
+            lb,
+        )
+}
+
+// ── Bell: two-operator FM tone (inharmonic ratio 2.76) ──
+// Modulator at freq·2.76 with depth = resonance·450 Hz frequency
+// modulates the carrier at freq. Dial `resonance` for metallic shimmer.
+// Named `bell_preset` to avoid collision with fundsp's `bell()` filter.
+fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
+    let lb = LfoBundle::from_params(p);
+    let fc = p.freq.clone();
+    let fm = p.freq.clone();
+    let fm_depth = p.resonance.clone();
+    let (lb_c, lb_m) = (lb.clone(), lb.clone());
+
+    let modulator_freq = lfo(move |t: f64| {
+        let b = fm.value() as f64 * 2.76;
+        lb_m.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    });
+    let modulator = modulator_freq >> sine();
+    let mod_scale = lfo(move |_t: f64| fm_depth.value().min(0.65) as f64 * 450.0);
+    let modulator_scaled = modulator * mod_scale;
+
+    let carrier_base = lfo(move |t: f64| {
+        let b = fc.value() as f64;
+        lb_c.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    });
+    let bell_sig = (carrier_base + modulator_scaled) >> sine();
+
+    let bpm_am = g.bpm.clone();
+    let am = lfo(move |t: f64| 0.85 + 0.15 * pulse_sine(t, bpm_am.value() as f64 * 0.25));
+    let body = bell_sig * am * 0.30;
+
+    let stereo = body >> split::<U2>() >> reverb_stereo(25.0, 8.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());

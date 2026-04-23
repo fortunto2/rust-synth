@@ -398,8 +398,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
+        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
@@ -513,6 +513,14 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
         }
         KeyCode::Char('P') => {
             pattern_rot_nudge(engine, app, 1.0);
+            return;
+        }
+        KeyCode::Char('t') => {
+            cycle_kind(engine, app, true);
+            return;
+        }
+        KeyCode::Char('T') => {
+            cycle_kind(engine, app, false);
             return;
         }
         KeyCode::Char('w') => {
@@ -655,6 +663,31 @@ fn pattern_rot_nudge(engine: &EngineHandle, app: &AppState, delta: f32) {
         let v = (track.params.pattern_rotation.value() + delta).rem_euclid(steps);
         track.params.pattern_rotation.set_value(v);
     }
+}
+
+/// Cycle the selected track's preset kind and rebuild the master graph
+/// so the new voice takes effect immediately. Sets a status line so the
+/// change is visible.
+fn cycle_kind(engine: &EngineHandle, app: &mut AppState, forward: bool) {
+    let new_kind = {
+        let mut tracks = engine.tracks.lock();
+        let Some(track) = tracks.get_mut(app.selected_track) else {
+            return;
+        };
+        let nk = if forward {
+            track.kind.next()
+        } else {
+            track.kind.prev()
+        };
+        track.kind = nk;
+        nk
+    };
+    engine.rebuild_graph();
+    app.set_status(format!(
+        "kind → {} (slot {})",
+        new_kind.label(),
+        app.selected_track
+    ));
 }
 
 fn adjust(track: &Track, app: &AppState, sign: f32) {

@@ -131,6 +131,8 @@ fn cutoff_curve(
         PresetKind::Heartbeat => s.freq * 0.5,
         PresetKind::BassPulse => s.cutoff.min(900.0),
         PresetKind::Bell => s.freq * 2.76,
+        PresetKind::SuperSaw => s.cutoff,
+        PresetKind::PluckSaw => s.cutoff * 0.3 + 180.0,
     };
     // Log-map 40..12000 Hz → [0, 1].
     ((raw.max(1.0).ln() - 40f32.ln()) / (12000f32.ln() - 40f32.ln())).clamp(0.0, 1.0)

@@ -144,6 +144,56 @@ fn lines_for(kind: PresetKind, s: &crate::audio::track::TrackSnapshot, bpm: f32)
                 Span::styled(format!("{:.2}", s.gain), key),
             ]));
         }
+        PresetKind::SuperSaw => {
+            out.push(Line::from(Span::styled("Serum-style 7-voice saw stack:", hi)));
+            out.push(Line::from(Span::styled(
+                "  voice_i(t) = saw(2π · f · 2^(offsᵢ · |detune| / 1200) · t)",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "  offsᵢ = [-1, -⅔, -⅓, 0, +⅓, +⅔, +1]",
+                dim,
+            )));
+            out.push(Line::from(Span::styled(
+                "sub(t) = 0.22 · sin(π · f · t)",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "y = Moog(Σ voiceᵢ/7 + sub, cut, q) ⇒ chorus ⇒ hall(16m,3s)",
+                hi,
+            )));
+            out.push(Line::from(vec![
+                Span::styled("  spread = ", dim),
+                Span::styled(format!("{:.0} ct", s.detune.abs()), key),
+                Span::styled("  cut = ", dim),
+                Span::styled(format!("{:>5.0} Hz", s.cutoff), key),
+            ]));
+        }
+        PresetKind::PluckSaw => {
+            out.push(Line::from(Span::styled("Step-gated saw pluck:", hi)));
+            out.push(Line::from(Span::styled(
+                "  osc = 0.35·saw(f·t) + 0.35·saw(f · 2^(det/2400) · t)",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "  cut_env = 180 + (cutoff − 180) · e^(−5·φₛ)    on active step",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "  amp_env = e^(−4.5·φₛ)                         on active step",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "y = Moog(osc, cut_env, q) · amp_env ⇒ chorus ⇒ hall(18m,3.5s)",
+                hi,
+            )));
+            out.push(Line::from(vec![
+                Span::styled("  cut = ", dim),
+                Span::styled(format!("{:>5.0}", s.cutoff), key),
+                Span::styled("  det = ", dim),
+                Span::styled(format!("{:>+3.0} ct", s.detune), key),
+            ]));
+        }
         PresetKind::Bell => {
             out.push(Line::from(Span::styled("2-operator FM bell:", hi)));
             out.push(Line::from(Span::styled(

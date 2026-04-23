@@ -21,16 +21,20 @@ pub enum PresetKind {
     Heartbeat,
     BassPulse,
     Bell,
+    SuperSaw,
+    PluckSaw,
 }
 
 /// All preset kinds in cycle order. Used by the TUI `t` / `T` keys.
-pub const ALL_KINDS: [PresetKind; 6] = [
+pub const ALL_KINDS: [PresetKind; 8] = [
     PresetKind::PadZimmer,
     PresetKind::BassPulse,
     PresetKind::Heartbeat,
     PresetKind::DroneSub,
     PresetKind::Shimmer,
     PresetKind::Bell,
+    PresetKind::SuperSaw,
+    PresetKind::PluckSaw,
 ];
 
 impl PresetKind {
@@ -42,6 +46,8 @@ impl PresetKind {
             PresetKind::Heartbeat => "Heartbeat",
             PresetKind::BassPulse => "Bass",
             PresetKind::Bell => "Bell",
+            PresetKind::SuperSaw => "SuperSaw",
+            PresetKind::PluckSaw => "Pluck",
         }
     }
 
@@ -153,6 +159,8 @@ impl Preset {
             PresetKind::Heartbeat => heartbeat(p, g),
             PresetKind::BassPulse => bass_pulse(p, g),
             PresetKind::Bell => bell_preset(p, g),
+            PresetKind::SuperSaw => super_saw(p, g),
+            PresetKind::PluckSaw => pluck_saw(p, g),
         }
     }
 }
@@ -609,6 +617,163 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
     let stereo = body >> split::<U2>() >> reverb_stereo(25.0, 8.0, 0.85);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
+    voiced
+        * stereo_gate_voiced(
+            p.gain.clone(),
+            p.mute.clone(),
+            p.pulse_depth.clone(),
+            g.bpm.clone(),
+            p.life_mod.clone(),
+            lb,
+        )
+}
+
+// ── SuperSaw: Serum-style 7-voice detuned saw stack + sine sub ──
+// Seven saws spread symmetrically across ±|detune| cents. Classic
+// trance/lead texture — as `detune` grows the stack goes from clean
+// unison to lush chorus. Amplitude 1/(N+2) keeps the sum safe from clip.
+fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
+    let lb = LfoBundle::from_params(p);
+    let cut = p.cutoff.clone();
+    let res_s = p.resonance.clone();
+
+    const OFFS: [f64; 7] = [-1.0, -0.66, -0.33, 0.0, 0.33, 0.66, 1.0];
+    // FunDSP scalar ops on WaveSynth take f32 (not f64).
+    let voice_amp: f32 = 0.55 / OFFS.len() as f32;
+
+    // Build the 7-voice saw stack by folding Net additions.
+    let mut stack: Option<Net> = None;
+    for &off in OFFS.iter() {
+        let f_c = p.freq.clone();
+        let d_c = p.detune.clone();
+        let lb_c = lb.clone();
+        let voice = lfo(move |t: f64| {
+            let width = (d_c.value().abs() as f64).max(1.0);
+            let cents = off * width;
+            let base = f_c.value() as f64 * 2.0_f64.powf(cents / 1200.0);
+            lb_c.apply(base, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+        }) >> (saw() * voice_amp);
+        let wrapped = Net::wrap(Box::new(voice));
+        stack = Some(match stack {
+            Some(acc) => acc + wrapped,
+            None => wrapped,
+        });
+    }
+    let saw_stack = stack.expect("N > 0");
+
+    // Sub-octave sine for weight.
+    let f_sub = p.freq.clone();
+    let lb_sub = lb.clone();
+    let sub = lfo(move |t: f64| {
+        let b = f_sub.value() as f64 * 0.5;
+        lb_sub.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }) >> (sine() * 0.22);
+    let sub_net = Net::wrap(Box::new(sub));
+
+    let mixed = saw_stack + sub_net;
+
+    let lb_cut = lb.clone();
+    let cut_mod = lfo(move |t: f64| {
+        let b = cut.value() as f64;
+        lb_cut.apply(b, LFO_CUTOFF, t, |b, m| b * 2.0_f64.powf(m))
+    }) >> follow(0.05);
+    let res_mod = lfo(move |_t: f64| res_s.value().min(0.65) as f64) >> follow(0.08);
+
+    let filtered = (mixed | Net::wrap(Box::new(cut_mod)) | Net::wrap(Box::new(res_mod)))
+        >> Net::wrap(Box::new(moog()));
+
+    let stereo = filtered
+        >> Net::wrap(Box::new(split::<U2>()))
+        >> Net::wrap(Box::new(
+            chorus(0, 0.0, 0.012, 0.4) | chorus(1, 0.0, 0.014, 0.4),
+        ))
+        >> Net::wrap(Box::new(reverb_stereo(16.0, 3.0, 0.88)));
+
+    let with_super = stereo >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
+    voiced
+        * stereo_gate_voiced(
+            p.gain.clone(),
+            p.mute.clone(),
+            p.pulse_depth.clone(),
+            g.bpm.clone(),
+            p.life_mod.clone(),
+            lb,
+        )
+}
+
+// ── PluckSaw: step-gated saw pluck with filter envelope ──
+// Fires on every active Euclidean step. Each hit opens the Moog from
+// 180 Hz up to the user cutoff and decays, making notes feel plucked.
+fn pluck_saw(p: &TrackParams, g: &GlobalParams) -> Net {
+    let lb = LfoBundle::from_params(p);
+
+    let f_a = p.freq.clone();
+    let lb_a = lb.clone();
+    let osc_a = lfo(move |t: f64| {
+        let b = f_a.value() as f64;
+        lb_a.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }) >> (saw() * 0.35);
+
+    let f_b = p.freq.clone();
+    let det = p.detune.clone();
+    let lb_b = lb.clone();
+    let osc_b = lfo(move |t: f64| {
+        let cents = det.value() as f64 * 0.5;
+        let b = f_b.value() as f64 * 2.0_f64.powf(cents / 1200.0);
+        lb_b.apply(b, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+    }) >> (saw() * 0.35);
+    let osc = osc_a + osc_b;
+
+    // Filter envelope: on each active step, cutoff decays from user
+    // value down to 180 Hz across the step. Off-steps stay muffled.
+    let bpm_f = g.bpm.clone();
+    let pat_f = p.pattern_bits.clone();
+    let cut_shared = p.cutoff.clone();
+    let lb_c = lb.clone();
+    let cut_env = lfo(move |t: f64| {
+        let bpm = bpm_f.value() as f64;
+        let bits = pat_f.load(Ordering::Relaxed);
+        let (active, phi) = rhythm::step_is_active(bits, t, bpm);
+        let user_cut = cut_shared.value() as f64;
+        let base = if active {
+            180.0 + (user_cut - 180.0) * (-phi * 5.0).exp()
+        } else {
+            180.0
+        };
+        lb_c.apply(base, LFO_CUTOFF, t, |b, m| b * 2.0_f64.powf(m))
+    }) >> follow(0.01);
+
+    let res_s = p.resonance.clone();
+    let res_mod = lfo(move |_t: f64| res_s.value().min(0.65) as f64) >> follow(0.05);
+
+    let filtered =
+        (osc | Net::wrap(Box::new(cut_env)) | Net::wrap(Box::new(res_mod))) >> Net::wrap(Box::new(moog()));
+
+    // Amplitude envelope — step-gated, fast decay.
+    let bpm_env = g.bpm.clone();
+    let pat_env = p.pattern_bits.clone();
+    let amp_env = lfo(move |t: f64| {
+        let bpm = bpm_env.value() as f64;
+        let bits = pat_env.load(Ordering::Relaxed);
+        let (active, phi) = rhythm::step_is_active(bits, t, bpm);
+        if active {
+            (-phi * 4.5).exp()
+        } else {
+            0.0
+        }
+    });
+    let plucked = filtered * Net::wrap(Box::new(amp_env));
+
+    let stereo = plucked
+        >> Net::wrap(Box::new(split::<U2>()))
+        >> Net::wrap(Box::new(
+            chorus(0, 0.0, 0.010, 0.5) | chorus(1, 0.0, 0.013, 0.5),
+        ))
+        >> Net::wrap(Box::new(reverb_stereo(18.0, 3.5, 0.88)));
+
+    let with_super = stereo >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_reverb_mix(p.reverb_mix.clone(), lb.clone());
     voiced
         * stereo_gate_voiced(

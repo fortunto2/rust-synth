@@ -142,6 +142,19 @@ fn lines_for(kind: PresetKind, s: &crate::audio::track::TrackSnapshot, bpm: f32)
         }
     }
 
+    // Universal supermassive tail line.
+    if s.supermass > 0.01 {
+        out.push(Line::from(""));
+        out.push(Line::from(vec![
+            Span::styled("Σ  supermass ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:.2}", s.supermass),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("   + rev(35m,15s)⇒chorus⇒rev(50m,28s)", dim),
+        ]));
+    }
+
     out.push(Line::from(""));
     if s.muted {
         out.push(Line::from(Span::styled("· MUTED · press 'a' to activate next slot", dim)));

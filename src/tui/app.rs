@@ -280,8 +280,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓ track · Enter→params · a add · d kill · m mute · r rand · e/E mutate · x cross · L couple · O auto-evolve · ,/. bpm · [/] master · q quit ",
-        Focus::Params => " ↑↓ param · ←→ adjust · Esc/Tab ←tracks · e/E mutate · x cross · L/O toggle · ,/. bpm · [/] master · q quit ",
+        Focus::Tracks => " ↑↓track · Enter→params · a add · d kill · m mute · r rand · e/E mutate · x cross · S/s supermass · L/O toggle · ,/. bpm · [/] master · q quit ",
+        Focus::Params => " ↑↓param · ←→ adjust · Esc/Tab ←tracks · e/E mutate · x cross · S/s supermass · L/O toggle · ,/. bpm · [/] master · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
@@ -351,6 +351,22 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
             app.life.inject_glider(0, 4);
             return;
         }
+        KeyCode::Char('S') => {
+            // Supermassive ON full for the selected track.
+            let tracks = engine.tracks.lock();
+            if let Some(track) = tracks.get(app.selected_track) {
+                track.params.supermass.set_value(1.0);
+            }
+            return;
+        }
+        KeyCode::Char('s') => {
+            // Supermassive OFF for the selected track.
+            let tracks = engine.tracks.lock();
+            if let Some(track) = tracks.get(app.selected_track) {
+                track.params.supermass.set_value(0.0);
+            }
+            return;
+        }
         _ => {}
     }
 
@@ -400,7 +416,7 @@ fn handle_params_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
     let Some(track) = tracks.get(app.selected_track) else {
         return;
     };
-    let n_params = 7;
+    let n_params = 8;
 
     match key.code {
         KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => app.focus = Focus::Tracks,
@@ -456,7 +472,8 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
             p.freq.set_value(v);
         }
         5 => p.reverb_mix.set_value((p.reverb_mix.value() + 0.05 * sign).clamp(0.0, 1.0)),
-        6 => p.pulse_depth.set_value((p.pulse_depth.value() + 0.05 * sign).clamp(0.0, 1.0)),
+        6 => p.supermass.set_value((p.supermass.value() + 0.1 * sign).clamp(0.0, 1.0)),
+        7 => p.pulse_depth.set_value((p.pulse_depth.value() + 0.05 * sign).clamp(0.0, 1.0)),
         _ => {}
     }
 }

@@ -34,16 +34,17 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1); 7])
+        .constraints([Constraint::Length(1); 8])
         .split(inner);
 
-    let items: [(&str, f32, String); 7] = [
+    let items: [(&str, f32, String); 8] = [
         ("gain    ", s.gain,                              format!("{:>4.2}", s.gain)),
         ("cutoff  ", norm_log(s.cutoff, 40.0, 12000.0),   format!("{:>5.0} Hz", s.cutoff)),
         ("resonance", s.resonance,                        format!("{:>4.2}", s.resonance)),
         ("detune  ", (s.detune + 50.0) / 100.0,           format!("{:>+3.0} ct", s.detune)),
         ("freq    ", norm_log(s.freq, 20.0, 880.0),       format!("{:>5.1} Hz", s.freq)),
         ("reverb  ", s.reverb_mix,                        format!("{:>4.2}", s.reverb_mix)),
+        ("supermass", s.supermass,                        format!("{:>4.2}", s.supermass)),
         ("pulse   ", s.pulse_depth,                       format!("{:>4.2}", s.pulse_depth)),
     ];
 

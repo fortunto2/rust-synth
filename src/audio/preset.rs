@@ -62,6 +62,32 @@ fn stereo_from_shared(s: Shared) -> Net {
     Net::wrap(Box::new(lfo(move |_t: f32| s.value()) >> split::<U2>()))
 }
 
+/// Valhalla-Supermassive-flavoured additive send.
+///
+/// Chain (when amount=1):
+///   rev(35m, 15s, 0.80) → chorus_L | chorus_R → rev(50m, 28s, 0.72)
+/// That is: a lush, diffuse hall with slow stereo pitch drift feeds a
+/// very long decaying FDN — infinite shimmer tail.
+///
+/// Returned node is stereo in/stereo out: `multipass & (effect · amount)`.
+/// At amount=0 it's pure passthrough (dry), at amount=1 the full chain
+/// is mixed in on top of the dry — additive, not replacement.
+fn supermass_send(amount: Shared) -> Net {
+    let a1 = amount.clone();
+    let a2 = amount;
+    let amount_l = lfo(move |_t: f32| a1.value());
+    let amount_r = lfo(move |_t: f32| a2.value());
+    let amount_stereo = Net::wrap(Box::new(amount_l | amount_r));
+
+    let effect = reverb_stereo(35.0, 15.0, 0.80)
+        >> (chorus(3, 0.0, 0.022, 0.28) | chorus(4, 0.0, 0.026, 0.28))
+        >> reverb_stereo(50.0, 28.0, 0.72);
+
+    let wet_scaled = Net::wrap(Box::new(effect)) * amount_stereo;
+    let dry = Net::wrap(Box::new(multipass::<U2>()));
+    dry & wet_scaled
+}
+
 /// Smoothed gate: `gain · (1 − mute)`, then `follow(0.25)` so mute both
 /// silences new sound and kills the reverb tail within ~0.3 s. Then
 /// BPM pulse modulates on top via `pulse_depth`.
@@ -112,7 +138,8 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         >> (chorus(0, 0.0, 0.015, 0.5) | chorus(1, 0.0, 0.020, 0.5))
         >> reverb_stereo(18.0, 4.0, 0.9);
 
-    let voiced = Net::wrap(Box::new(stereo)) * stereo_from_shared(p.reverb_mix.clone());
+    let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -146,7 +173,8 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
 
     let stereo = body >> split::<U2>() >> reverb_stereo(20.0, 5.0, 0.85);
 
-    let voiced = Net::wrap(Box::new(stereo)) * stereo_from_shared(p.reverb_mix.clone());
+    let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -170,7 +198,8 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
     let bright = osc >> highpass_hz(400.0, 0.5);
     let stereo = bright >> split::<U2>() >> reverb_stereo(22.0, 6.0, 0.85);
 
-    let voiced = Net::wrap(Box::new(stereo)) * stereo_from_shared(p.reverb_mix.clone());
+    let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),
@@ -200,7 +229,8 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
 
     let stereo = kick >> split::<U2>() >> reverb_stereo(14.0, 2.5, 0.7);
 
-    let voiced = Net::wrap(Box::new(stereo)) * stereo_from_shared(p.reverb_mix.clone());
+    let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
     voiced
         * stereo_gate_voiced(
             p.gain.clone(),

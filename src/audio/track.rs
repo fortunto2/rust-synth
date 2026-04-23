@@ -17,6 +17,7 @@ pub struct TrackParams {
     pub sweep_k: Shared,      // sigmoid slope (0.05..2.0)
     pub sweep_center: Shared, // seconds — sigmoid midpoint
     pub reverb_mix: Shared,   // 0.0..1.0
+    pub supermass: Shared,    // 0.0..1.0 — Valhalla-Supermassive-style long tail send
     pub pulse_depth: Shared,  // 0.0..1.0 — how much BPM modulates amplitude
     pub mute: Shared,         // 0.0 or 1.0 (1.0 = silent / dormant slot)
     pub freq: Shared,         // Hz — root frequency (for active modulation)
@@ -34,6 +35,7 @@ impl TrackParams {
             sweep_k: shared(1.2),
             sweep_center: shared(1.5),
             reverb_mix: shared(0.6),
+            supermass: shared(0.0),
             pulse_depth: shared(0.0),
             mute: shared(0.0),
             freq: shared(freq),
@@ -58,6 +60,7 @@ impl TrackParams {
             sweep_k: self.sweep_k.value(),
             sweep_center: self.sweep_center.value(),
             reverb_mix: self.reverb_mix.value(),
+            supermass: self.supermass.value(),
             pulse_depth: self.pulse_depth.value(),
             freq: self.freq.value(),
             muted: self.mute.value() > 0.5,
@@ -73,6 +76,7 @@ pub struct TrackSnapshot {
     pub sweep_k: f32,
     pub sweep_center: f32,
     pub reverb_mix: f32,
+    pub supermass: f32,
     pub pulse_depth: f32,
     pub freq: f32,
     pub muted: bool,

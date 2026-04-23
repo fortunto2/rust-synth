@@ -94,6 +94,7 @@ fn color_for(kind: PresetKind) -> Color {
         PresetKind::DroneSub => Color::Magenta,
         PresetKind::Shimmer => Color::LightYellow,
         PresetKind::Heartbeat => Color::Red,
+        PresetKind::BassPulse => Color::Green,
     }
 }
 

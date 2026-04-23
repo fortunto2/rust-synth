@@ -129,6 +129,7 @@ fn cutoff_curve(
         PresetKind::DroneSub => s.cutoff.clamp(40.0, 300.0),
         PresetKind::Shimmer => 4000.0, // fixed HP
         PresetKind::Heartbeat => s.freq * 0.5,
+        PresetKind::BassPulse => s.cutoff.min(900.0),
     };
     // Log-map 40..12000 Hz → [0, 1].
     ((raw.max(1.0).ln() - 40f32.ln()) / (12000f32.ln() - 40f32.ln())).clamp(0.0, 1.0)

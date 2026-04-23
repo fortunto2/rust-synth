@@ -8,7 +8,7 @@
 use fundsp::hacker::*;
 
 use super::track::TrackParams;
-use crate::math::pulse::{pulse_decay, pulse_sine};
+use crate::math::pulse::{beat_phase, pulse_decay, pulse_sine};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresetKind {
@@ -16,6 +16,7 @@ pub enum PresetKind {
     DroneSub,
     Shimmer,
     Heartbeat,
+    BassPulse,
 }
 
 impl PresetKind {
@@ -25,6 +26,7 @@ impl PresetKind {
             PresetKind::DroneSub => "Drone",
             PresetKind::Shimmer => "Shimmer",
             PresetKind::Heartbeat => "Heartbeat",
+            PresetKind::BassPulse => "Bass",
         }
     }
 }
@@ -124,6 +126,7 @@ impl Preset {
             PresetKind::DroneSub => drone_sub(p, g),
             PresetKind::Shimmer => shimmer(p, g),
             PresetKind::Heartbeat => heartbeat(p, g),
+            PresetKind::BassPulse => bass_pulse(p, g),
         }
     }
 }
@@ -283,22 +286,85 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         )
 }
 
-// ── Heartbeat ──
+// ── Heartbeat: 3-layer kick drum ──
+// Layers are all BPM-locked; they collapse to a single perceived hit.
+//   body (sine, freq·0.7..2.2 pitch sweep, medium decay) — the punch
+//   sub  (sine at freq·0.5, slow decay) — the boom tail
+//   click (HP-filtered brown noise, very fast decay) — transient snap
 fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
     let bpm = g.bpm.clone();
-    let bpm_for_freq = bpm.clone();
-    let freq_for_kick = p.freq.clone();
-    let kick_osc = lfo(move |t: f64| {
-        let base = freq_for_kick.value() as f64 * 0.5;
-        let pitch_env = (-pulse_decay(t, bpm_for_freq.value() as f64, 10.0) * 0.6).exp();
-        base * pitch_env
+
+    // Body — pitch-swept sine.
+    let bpm_body_f = bpm.clone();
+    let freq_body = p.freq.clone();
+    let body_osc = lfo(move |t: f64| {
+        let base = freq_body.value() as f64;
+        let phi = beat_phase(t, bpm_body_f.value() as f64);
+        let drop = (-phi * 30.0).exp();
+        base * (0.7 + 1.5 * drop)
     }) >> sine();
+    let bpm_body_e = bpm.clone();
+    let body_env = lfo(move |t: f64| pulse_decay(t, bpm_body_e.value() as f64, 6.0));
+    let body = body_osc * body_env * 0.85;
 
-    let bpm_for_env = bpm.clone();
-    let env = lfo(move |t: f64| pulse_decay(t, bpm_for_env.value() as f64, 9.0));
-    let kick = kick_osc * env * 0.7;
+    // Sub — constant low sine with slow decay.
+    let freq_sub = p.freq.clone();
+    let sub_osc = lfo(move |_t: f64| freq_sub.value() as f64 * 0.5) >> sine();
+    let bpm_sub_e = bpm.clone();
+    let sub_env = lfo(move |t: f64| pulse_decay(t, bpm_sub_e.value() as f64, 3.2));
+    let sub = sub_osc * sub_env * 0.45;
 
-    let stereo = kick >> split::<U2>() >> reverb_stereo(14.0, 2.5, 0.7);
+    // Click — short filtered-noise burst for transient snap.
+    let bpm_click = bpm.clone();
+    let click_env = lfo(move |t: f64| pulse_decay(t, bpm_click.value() as f64, 55.0));
+    let click = (brown() >> highpass_hz(1800.0, 0.5)) * click_env * 0.12;
+
+    let kick = body + sub + click;
+
+    let stereo = kick >> split::<U2>() >> reverb_stereo(10.0, 1.5, 0.88);
+
+    let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
+    let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());
+    voiced
+        * stereo_gate_voiced(
+            p.gain.clone(),
+            p.mute.clone(),
+            p.pulse_depth.clone(),
+            g.bpm.clone(),
+            p.life_mod.clone(),
+        )
+}
+
+// ── BassPulse: sustained bass line with BPM groove ──
+// Fundamental + 2nd harmonic + sub, Moog-lowpassed; groove envelope
+// pumps amplitude on every beat so the bass pulses instead of droning.
+fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
+    let f1 = p.freq.clone();
+    let f2 = p.freq.clone();
+    let f3 = p.freq.clone();
+    let cut = p.cutoff.clone();
+    let res_s = p.resonance.clone();
+
+    let fundamental = lfo(move |_t: f64| f1.value() as f64) >> (sine() * 0.55);
+    let second = lfo(move |_t: f64| f2.value() as f64 * 2.0) >> (sine() * 0.22);
+    let sub = lfo(move |_t: f64| f3.value() as f64 * 0.5) >> (sine() * 0.35);
+    let osc = fundamental + second + sub;
+
+    // Moog with cutoff hard-capped at 900 Hz — keeps the voice in bass
+    // territory no matter what the slider says.
+    let cut_mod = lfo(move |_t: f64| cut.value().min(900.0) as f64) >> follow(0.08);
+    let res_mod = lfo(move |_t: f64| res_s.value().min(0.65) as f64) >> follow(0.08);
+    let filtered = (osc | cut_mod | res_mod) >> moog();
+
+    // Groove — loud on the beat (1.0), soft between (0.45).
+    let bpm_groove = g.bpm.clone();
+    let groove = lfo(move |t: f64| {
+        let pump = pulse_decay(t, bpm_groove.value() as f64, 3.5);
+        0.45 + 0.55 * pump
+    });
+    let grooved = filtered * groove;
+
+    let stereo = grooved >> split::<U2>() >> reverb_stereo(14.0, 2.5, 0.88);
 
     let with_super = Net::wrap(Box::new(stereo)) >> supermass_send(p.supermass.clone());
     let voiced = with_super * stereo_from_shared(p.reverb_mix.clone());

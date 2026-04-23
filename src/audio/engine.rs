@@ -199,18 +199,16 @@ pub fn default_track_set() -> Vec<Track> {
     let root = 55.0f32; // A1
     let mut tracks = Vec::with_capacity(MAX_TRACKS);
 
-    // Active voices — hand-tuned for a pleasant opening texture.
+    // Active voices — Pad for harmony, Bass for groove, Heartbeat for pulse.
     tracks.push(Track::new(0, "Pad · root",   PresetKind::PadZimmer, golden_freq(root, 0)));
-    tracks.push(Track::new(1, "Sub Drone",    PresetKind::DroneSub,  golden_freq(root, -1)));
+    tracks.push(Track::new(1, "Bass",         PresetKind::BassPulse, golden_freq(root, 0)));
     tracks.push(Track::new(2, "Heartbeat",    PresetKind::Heartbeat, golden_freq(root, 0)));
-    // Pulse depth on the heartbeat so you can feel the BPM modulating the body.
-    tracks[2].params.pulse_depth.set_value(0.0);
 
-    // Dormant slots — press `a` in the TUI to activate next one.
-    tracks.push(Track::dormant(3, "— empty",  PresetKind::Shimmer,   golden_freq(root, 1)));
-    tracks.push(Track::dormant(4, "— empty",  PresetKind::PadZimmer, golden_freq(root, 2)));
-    tracks.push(Track::dormant(5, "— empty",  PresetKind::DroneSub,  golden_freq(root, -2)));
-    tracks.push(Track::dormant(6, "— empty",  PresetKind::Shimmer,   golden_freq(root, -1)));
+    // Dormant slots — `a` activates the next one.
+    tracks.push(Track::dormant(3, "— empty",  PresetKind::DroneSub,  golden_freq(root, -1)));
+    tracks.push(Track::dormant(4, "— empty",  PresetKind::Shimmer,   golden_freq(root, 1)));
+    tracks.push(Track::dormant(5, "— empty",  PresetKind::BassPulse, golden_freq(root, -1)));
+    tracks.push(Track::dormant(6, "— empty",  PresetKind::Shimmer,   golden_freq(root, 2)));
     tracks.push(Track::dormant(7, "— empty",  PresetKind::PadZimmer, golden_freq(root, 1)));
 
     tracks

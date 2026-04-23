@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use fundsp::hacker::*;
 use hound::{SampleFormat, WavSpec, WavWriter};
-use rust_synth::audio::preset::{GlobalParams, Preset, PresetKind};
+use rust_synth::audio::preset::{master_bus, GlobalParams, Preset, PresetKind};
 use rust_synth::audio::track::TrackParams;
 use std::path::PathBuf;
 
@@ -41,16 +41,16 @@ fn build_demo_graph() -> Net {
     let g = GlobalParams::default();
 
     let pad = TrackParams::default_for(55.0);
-    let drone = TrackParams::default_for(34.0);
-    drone.gain.set_value(0.32);
-    drone.reverb_mix.set_value(0.7);
+    let bass = TrackParams::default_for(55.0);
+    bass.gain.set_value(0.55);
+    bass.cutoff.set_value(600.0);
     let heart = TrackParams::default_for(55.0);
-    heart.gain.set_value(0.5);
+    heart.gain.set_value(0.7);
 
     let a = Preset::build(PresetKind::PadZimmer, &pad, &g);
-    let b = Preset::build(PresetKind::DroneSub, &drone, &g);
+    let b = Preset::build(PresetKind::BassPulse, &bass, &g);
     let c = Preset::build(PresetKind::Heartbeat, &heart, &g);
-    (a + b + c) * 0.6
+    (a + b + c) * 0.55 >> master_bus(g.brightness.clone())
 }
 
 struct Args {

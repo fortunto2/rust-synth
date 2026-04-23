@@ -123,20 +123,49 @@ fn lines_for(kind: PresetKind, s: &crate::audio::track::TrackSnapshot, bpm: f32)
             ]));
         }
         PresetKind::Heartbeat => {
+            out.push(Line::from(Span::styled("3-layer kick:", hi)));
+            out.push(Line::from(Span::styled("  body = sin(2π · f·(0.7 + 1.5·e^(−30·φ)) · t)", hi)));
+            out.push(Line::from(Span::styled("  sub  = sin(2π · f/2 · t)", hi)));
             out.push(Line::from(Span::styled(
-                "env(t) = exp(−9 · φ(t))     φ(t) = (t mod 60/bpm) · bpm/60",
+                "  click = HP(brown, 1.8 kHz)",
                 hi,
             )));
             out.push(Line::from(Span::styled(
-                "kick(t) = sin(2π · f/2 · exp(−0.6·env²) · t)",
-                hi,
+                "env_body = e^(−6·φ)  env_sub = e^(−3.2·φ)  env_click = e^(−55·φ)",
+                dim,
             )));
             out.push(Line::from(""));
-            out.push(Line::from(Span::styled("y = 0.7 · kick · env ⇒ hall(18m, 3s)", hi)));
+            out.push(Line::from(Span::styled(
+                "y = body·env_body + sub·env_sub + click·env_click ⇒ hall(10m, 1.5s)",
+                hi,
+            )));
             out.push(Line::from(vec![
-                Span::styled("  pulse = ", dim),
-                Span::styled(format!("{:.2}", s.pulse_depth), key),
-                Span::styled("   gain = ", dim),
+                Span::styled("  gain = ", dim),
+                Span::styled(format!("{:.2}", s.gain), key),
+            ]));
+        }
+        PresetKind::BassPulse => {
+            out.push(Line::from(Span::styled(
+                "osc = 0.55·sin(2π·f·t) + 0.22·sin(4π·f·t) + 0.35·sin(π·f·t)",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "y = Moog(osc, min(cut, 900), q) · groove(t)",
+                hi,
+            )));
+            out.push(Line::from(Span::styled(
+                "groove(t) = 0.45 + 0.55 · e^(−3.5·φ)    φ = (t mod 60/bpm)·bpm/60",
+                dim,
+            )));
+            out.push(Line::from(""));
+            out.push(Line::from(vec![
+                Span::styled("  cut = ", dim),
+                Span::styled(format!("{:>5.0} Hz", s.cutoff.min(900.0)), key),
+                Span::styled("  q = ", dim),
+                Span::styled(format!("{:.2}", s.resonance.min(0.65)), key),
+                Span::styled("  rev = ", dim),
+                Span::styled(format!("{:.2}", s.reverb_mix), key),
+                Span::styled("  gain = ", dim),
                 Span::styled(format!("{:.2}", s.gain), key),
             ]));
         }

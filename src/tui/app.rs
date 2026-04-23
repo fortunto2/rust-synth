@@ -642,7 +642,7 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     p.cutoff.set_value(600.0 + 2500.0 * rand_f32(&mut app.rng_seed).abs());
     p.resonance.set_value(0.15 + 0.30 * rand_f32(&mut app.rng_seed).abs());
     p.reverb_mix.set_value(0.45 + 0.45 * rand_f32(&mut app.rng_seed).abs());
-    if matches!(track.kind, PresetKind::Heartbeat) {
+    if matches!(track.kind, PresetKind::Heartbeat | PresetKind::BassPulse) {
         p.pulse_depth.set_value(0.0);
     } else {
         p.pulse_depth.set_value(0.2 * rand_f32(&mut app.rng_seed).abs());

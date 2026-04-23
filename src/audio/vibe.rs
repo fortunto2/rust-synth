@@ -82,12 +82,14 @@ fn apply_blade_runner(engine: &EngineHandle) {
         p.arp.set_value(0.25);
     });
     set_track(&tracks, 2, PresetKind::Heartbeat, root, |p| {
-        p.gain.set_value(0.55);
-        p.character.set_value(0.35); // soft thud, not 808 punch
+        p.gain.set_value(0.65);
+        // Low character → almost no click, all 808-style sub boom.
+        // No more "knock on wood in the distance."
+        p.character.set_value(0.18);
         p.pattern_hits.set_value(3.0); // sparse
         p.pattern_rotation.set_value(0.0);
-        p.reverb_mix.set_value(0.85);
-        p.supermass.set_value(0.40);
+        p.reverb_mix.set_value(0.45); // up-front, not cavernous
+        p.supermass.set_value(0.15);
     });
     set_track(&tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
         p.gain.set_value(0.32);

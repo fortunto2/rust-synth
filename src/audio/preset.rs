@@ -570,6 +570,8 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
     let body = body_osc * body_env * 0.85;
 
     // Sub — low sine, slower decay bleeds across the step boundary.
+    // Amplitude comes from the sub_scale LFO defined below so we can
+    // lean into 808 boom at low character values.
     let freq_sub = p.freq.clone();
     let sub_osc = lfo(move |_t: f64| freq_sub.value() as f64 * 0.5) >> sine();
     let bpm_sub_e = bpm.clone();
@@ -584,24 +586,41 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
             0.0
         }
     });
-    let sub = sub_osc * sub_env * 0.45;
+    let sub = sub_osc * sub_env;
 
-    // Click — very short burst on every active step.
+    // Click — short burst on active steps. Amplitude is driven by
+    // `character`: low → no click (pure 808 boom), high → snappy punch.
     let bpm_click = bpm.clone();
     let pat_click = p.pattern_bits.clone();
+    let char_click = p.character.clone();
     let click_env = lfo(move |t: f64| {
         let bpm_v = bpm_click.value() as f64;
         let bits = pat_click.load(Ordering::Relaxed);
         let (active, phi) = rhythm::step_is_active(bits, t, bpm_v);
         if active {
-            (-phi * 40.0).exp()
+            // Envelope amplitude scales with character:
+            //   0.0 → 0.02 (barely there)
+            //   0.5 → 0.12 (classic, current)
+            //   1.0 → 0.22 (snappy)
+            let amp = 0.02 + char_click.value().clamp(0.0, 1.0) as f64 * 0.20;
+            (-phi * 40.0).exp() * amp
         } else {
             0.0
         }
     });
-    let click = (brown() >> highpass_hz(1800.0, 0.5)) * click_env * 0.12;
+    let click = (brown() >> highpass_hz(1800.0, 0.5)) * click_env;
 
-    let kick = body + sub + click;
+    // Sub amplitude inversely scales with character — at low character
+    // the kick is ALL sub-boom; at high character the click and short
+    // body carry the energy instead.
+    let char_sub = p.character.clone();
+    let sub_scale = lfo(move |_t: f64| {
+        // 1.0 → 0.55 (lots of sub)  ·  0.5 → 0.45  ·  0.0 → 0.35
+        0.35 + (1.0 - char_sub.value().clamp(0.0, 1.0) as f64) * 0.20
+    });
+    let sub_scaled = sub * sub_scale;
+
+    let kick = body + sub_scaled + click;
 
     let stereo = kick >> split::<U2>() >> reverb_stereo(10.0, 1.5, 0.88);
 

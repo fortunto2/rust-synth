@@ -2,9 +2,24 @@
 name = "rust-synth"
 version = "0.16.0"
 edition = "2021"
-description = "Terminal modular ambient synthesizer — FunDSP + Ratatui"
+description = "Terminal modular ambient synthesizer — FunDSP + Ratatui. Long cinematic pads, Euclidean drum sequencer, per-track LFO, Valhalla-Supermassive-style reverb, genetic evolution coupled to Conway's Game of Life, TOML presets, FLAC recording."
 license = "MIT"
 authors = ["Rustam <info@superduperai.co>"]
+homepage = "https://github.com/fortunto2/rust-synth"
+repository = "https://github.com/fortunto2/rust-synth"
+documentation = "https://docs.rs/rust-synth"
+readme = "README.md"
+keywords = ["synthesizer", "ambient", "dsp", "tui", "music"]
+categories = ["multimedia::audio", "command-line-utilities", "multimedia"]
+exclude = [
+    "out/*",
+    "dist/*",
+    "recordings/*",
+    "presets/*",
+    "docs/*",
+    "*.wav",
+    "*.flac",
+]
 
 [[bin]]
 name = "rust-synth"

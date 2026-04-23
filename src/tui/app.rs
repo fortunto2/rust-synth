@@ -60,6 +60,7 @@ pub struct AppState {
     // ── Life + evolution ──
     pub life: Life,
     pub last_beat_index: i64,
+    pub last_bar_index: i64,
     pub last_evolve_beat: i64,
     pub evolve_period: u32,
     pub coupling: bool,
@@ -85,6 +86,7 @@ impl AppState {
             rng_seed: 0x00C0_FFEE_DEAD_BEEF,
             life,
             last_beat_index: -1,
+            last_bar_index: -1,
             last_evolve_beat: 0,
             evolve_period: DEFAULT_EVOLVE_PERIOD,
             coupling: true,
@@ -170,6 +172,17 @@ fn advance_beat_sync(app: &mut AppState, engine: &EngineHandle) {
 
     if cur_beat <= app.last_beat_index {
         return;
+    }
+
+    // ── Chord progression: advance every 4 bars (16 beats) ──
+    // All voices read chord_offset(bank, index) through FreqMod, so
+    // transposing once here moves the whole mix to the next chord.
+    let cur_bar = cur_beat / 16;
+    if cur_bar > app.last_bar_index {
+        let idx = engine.global.chord_index.value().round() as u32;
+        let next = (idx + 1) % 4;
+        engine.global.chord_index.set_value(next as f32);
+        app.last_bar_index = cur_bar;
     }
     let steps = (cur_beat - app.last_beat_index).min(4) as usize;
     for _ in 0..steps {

@@ -1,14 +1,16 @@
 //! Track list widget — gain bars + mute/active state.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::Frame;
 
 use super::app::AppState;
+use super::theme::Theme;
 use crate::audio::engine::EngineHandle;
 
 pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) {
+    let theme = Theme::NIGHT_CITY;
     let tracks = engine.tracks.lock();
     let items: Vec<ListItem> = tracks
         .iter()
@@ -34,11 +36,11 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
                 f = snap.freq,
             );
             let style = if i == app.selected_track {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme.accent()).add_modifier(Modifier::BOLD)
             } else if snap.muted {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme.fg_dim())
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme.fg())
             };
             ListItem::new(line).style(style)
         })
@@ -47,8 +49,13 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.fg_dim()))
             .title(" tracks ")
-            .title_style(Style::default().add_modifier(Modifier::BOLD)),
+            .title_style(
+                Style::default()
+                    .fg(theme.accent())
+                    .add_modifier(Modifier::BOLD),
+            ),
     );
     f.render_widget(list, area);
 }

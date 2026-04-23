@@ -55,6 +55,8 @@ fn apply_blade_runner(engine: &EngineHandle) {
     engine.global.brightness.set_value(0.45);
     engine.global.master_gain.set_value(0.65);
     engine.global.scale_mode.set_value(1.0); // minor pentatonic
+    engine.global.chord_bank.set_value(0.0); // Am-F-C-G
+    engine.global.chord_index.set_value(0.0);
 
     let tracks = engine.tracks.lock();
     let root = 55.0_f32; // A1
@@ -133,6 +135,8 @@ fn apply_cathedral(engine: &EngineHandle) {
     engine.global.brightness.set_value(0.55);
     engine.global.master_gain.set_value(0.60);
     engine.global.scale_mode.set_value(0.0);
+    engine.global.chord_bank.set_value(1.0); // Dm-F-Am-G
+    engine.global.chord_index.set_value(0.0);
 
     let tracks = engine.tracks.lock();
     let root = 55.0_f32;
@@ -177,6 +181,8 @@ fn apply_dance_floor(engine: &EngineHandle) {
     engine.global.brightness.set_value(0.75);
     engine.global.master_gain.set_value(0.70);
     engine.global.scale_mode.set_value(0.0);
+    engine.global.chord_bank.set_value(2.0); // Am-C-G-F
+    engine.global.chord_index.set_value(0.0);
 
     let tracks = engine.tracks.lock();
     let root = 55.0_f32;
@@ -228,6 +234,8 @@ fn apply_default(engine: &EngineHandle) {
     engine.global.brightness.set_value(0.6);
     engine.global.master_gain.set_value(0.7);
     engine.global.scale_mode.set_value(0.0);
+    engine.global.chord_bank.set_value(0.0);
+    engine.global.chord_index.set_value(0.0);
 
     let tracks = engine.tracks.lock();
     let root = 55.0_f32;

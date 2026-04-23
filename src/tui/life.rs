@@ -15,6 +15,7 @@ use crate::audio::engine::EngineHandle;
 use crate::audio::preset::PresetKind;
 
 use super::app::AppState;
+use super::theme::Theme;
 
 const CELL: &str = "██";
 const DEAD: &str = "··";
@@ -86,10 +87,16 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         life.generation,
         life.density() * 100.0,
     );
+    let theme = Theme::NIGHT_CITY;
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.fg_dim()))
         .title(title)
-        .title_style(Style::default().add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme.accent())
+                .add_modifier(Modifier::BOLD),
+        );
     let para = Paragraph::new(lines).block(block);
     f.render_widget(para, area);
 }

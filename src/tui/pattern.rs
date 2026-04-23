@@ -12,6 +12,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use super::app::AppState;
+use super::theme::Theme;
 use crate::audio::engine::EngineHandle;
 use crate::audio::preset::PresetKind;
 use crate::math::rhythm;
@@ -47,6 +48,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         format!(" pattern · {} · (non-drum, ignored) ", name)
     };
 
+    let theme = Theme::NIGHT_CITY;
     let mut cells: Vec<Span> = Vec::with_capacity(STEPS as usize * 2);
     for step in 0..STEPS {
         let active = (bits >> step) & 1 == 1;
@@ -58,11 +60,11 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
             (false, false) => "··",
         };
         let color = match (active, is_current) {
-            (true, true) => Color::Yellow,
-            (true, false) if is_drum => Color::Red,
-            (true, false) => Color::DarkGray,
-            (false, true) => Color::Rgb(120, 120, 140),
-            (false, false) => Color::Rgb(40, 40, 44),
+            (true, true) => theme.accent(), // cyan — current step on hit
+            (true, false) if is_drum => theme.warn(), // red — hit
+            (true, false) => theme.fg_dim(),
+            (false, true) => theme.accent(), // cyan cursor
+            (false, false) => Color::Rgb(40, 40, 44), // near-invisible empty
         };
         let style = if is_current {
             Style::default().fg(color).add_modifier(Modifier::BOLD)
@@ -85,8 +87,13 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.fg_dim()))
         .title(title)
-        .title_style(Style::default().add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme.accent())
+                .add_modifier(Modifier::BOLD),
+        );
     let para = Paragraph::new(body).block(block);
     f.render_widget(para, area);
 }

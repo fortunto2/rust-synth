@@ -77,6 +77,16 @@ pub struct GlobalParams {
     pub brightness: Shared,
     /// Arpeggiator scale mode — 0 major pent · 1 minor pent · 2 bhairavi.
     pub scale_mode: Shared,
+    /// Current chord index within the active chord bank [0.0, 3.0].
+    /// The TUI advances this every 4 bars so all voices transpose
+    /// together and the piece walks a progression instead of holding
+    /// one root forever.
+    pub chord_index: Shared,
+    /// Chord bank selector — which 4-chord progression is active.
+    ///   0 Am-F-C-G    (classic minor, Vangelis-approved)
+    ///   1 Dm-F-Am-G   (Memories of Green feel)
+    ///   2 Am-C-G-F    (pop-rock cadence)
+    pub chord_bank: Shared,
 }
 
 impl Default for GlobalParams {
@@ -86,8 +96,28 @@ impl Default for GlobalParams {
             master_gain: shared(0.7),
             brightness: shared(0.6),
             scale_mode: shared(0.0),
+            chord_index: shared(0.0),
+            chord_bank: shared(0.0),
         }
     }
+}
+
+/// Chord progressions in root-offset semitones (relative to the voice's
+/// freq slider, which acts as the tonic). Every bank is 4 chords long,
+/// advanced every 4 bars in the TUI loop. Motifs and the arp pattern
+/// continue relative to whichever chord is current, so the whole mix
+/// transposes together and feels like a progression rather than a drone.
+pub const CHORD_BANKS: [[f64; 4]; 3] = [
+    [0.0, -4.0, -9.0, -2.0], // Am-F-C-G
+    [0.0, -3.0, -8.0, -5.0], // Dm-F-Am-G
+    [0.0, -9.0, -2.0, -4.0], // Am-C-G-F
+];
+
+#[inline]
+pub fn chord_offset(bank: u32, idx: u32) -> f64 {
+    let b = (bank as usize) % CHORD_BANKS.len();
+    let i = (idx as usize) % 4;
+    CHORD_BANKS[b][i]
 }
 
 pub const MASTER_SHELF_HZ: f64 = 3500.0;
@@ -127,6 +157,11 @@ pub fn master_bus(brightness: Shared) -> Net {
     let b_lp_l = brightness.clone();
     let b_lp_r = brightness;
 
+    // ── Tape warmth ── tiny soft-clip before EQ gives the whole mix
+    // the gentle non-linearity that separates "analogue" from "digital".
+    // Softsign(1.2) is mostly transparent; it only bends peaks.
+    let _warm_info = "softsign tape saturation";
+
     // ── Shelf stage ──
     let sh_f_l = lfo(|_t: f64| MASTER_SHELF_HZ);
     let sh_f_r = lfo(|_t: f64| MASTER_SHELF_HZ);
@@ -143,8 +178,9 @@ pub fn master_bus(brightness: Shared) -> Net {
     let lp_q_l = lfo(|_t: f64| 0.5_f64);
     let lp_q_r = lfo(|_t: f64| 0.5_f64);
 
-    let left = shelf_l >> (pass() | lp_c_l | lp_q_l) >> lowpass();
-    let right = shelf_r >> (pass() | lp_c_r | lp_q_r) >> lowpass();
+    // Each channel: soft-clip warmth → high-shelf → lowpass.
+    let left = shelf_l >> shape(Softsign(1.2)) >> (pass() | lp_c_l | lp_q_l) >> lowpass();
+    let right = shelf_r >> shape(Softsign(1.2)) >> (pass() | lp_c_r | lp_q_r) >> lowpass();
     let stereo = left | right;
 
     let chain = stereo >> limiter_stereo(0.001, 0.3);
@@ -259,6 +295,8 @@ pub struct FreqMod {
     pub arp: Shared,
     pub bpm: Shared,
     pub scale_mode: Shared,
+    pub chord_bank: Shared,
+    pub chord_index: Shared,
     pub lb: LfoBundle,
 }
 
@@ -268,16 +306,31 @@ impl FreqMod {
             arp: p.arp.clone(),
             bpm: g.bpm.clone(),
             scale_mode: g.scale_mode.clone(),
+            chord_bank: g.chord_bank.clone(),
+            chord_index: g.chord_index.clone(),
             lb: LfoBundle::from_params(p),
         }
     }
 
-    /// Apply arpeggiator (scale-snapped pitch walk) and LFO-FREQ to a
-    /// base frequency. `seed` should be stable per track — we hash
-    /// `base` so different tracks naturally play different arp sequences.
+    /// Apply every pitch modulator in sequence:
+    ///   1. Chord-progression transpose (global, all voices in sync)
+    ///   2. Motif arpeggiator (per-track, scale-snapped)
+    ///   3. Analog drift (tiny ±3 cents slow sine, per-partial phase)
+    ///   4. LFO-FREQ (user vibrato)
+    ///
+    /// `base` hashes to a stable seed so each partial of each voice
+    /// drifts independently — that's what CS-80 "choir" character is.
     #[inline]
     pub fn apply(&self, base: f64, t: f64) -> f64 {
         let seed = (base.max(1.0).ln() * 1_000.0) as u64;
+
+        // 1. Chord transpose.
+        let bank = self.chord_bank.value().round() as u32;
+        let cidx = self.chord_index.value().round() as u32;
+        let chord_semis = chord_offset(bank, cidx);
+        let transposed = base * 2.0_f64.powf(chord_semis / 12.0);
+
+        // 2. Motif arp on top of transposed root.
         let scale = self.scale_mode.value().round() as u32;
         let off = arp_offset_semitones(
             t,
@@ -286,9 +339,18 @@ impl FreqMod {
             seed,
             scale,
         );
-        let arped = base * 2.0_f64.powf(off / 12.0);
+        let arped = transposed * 2.0_f64.powf(off / 12.0);
+
+        // 3. Analog drift — ±3 cents slow sine, per-partial phase so
+        //    the chord breathes rather than moving as a block.
+        let drift_phase = (seed as f64) * 0.173;
+        let drift_amount =
+            0.003 * (std::f64::consts::TAU * 0.08 * t + drift_phase).sin();
+        let drifted = arped * (1.0 + drift_amount);
+
+        // 4. User LFO on freq.
         self.lb
-            .apply(arped, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
+            .apply(drifted, LFO_FREQ, t, |b, m| b * 2.0_f64.powf(m / 12.0))
     }
 }
 

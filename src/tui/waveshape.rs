@@ -16,6 +16,7 @@ use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use super::app::AppState;
+use super::theme::Theme;
 use crate::audio::engine::EngineHandle;
 use crate::audio::preset::PresetKind;
 use crate::audio::track::TrackSnapshot;
@@ -38,12 +39,18 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     let (color, subtitle) = describe(kind, &s);
     let title = format!(" waveshape · {} · {} ", name, subtitle);
 
+    let theme = Theme::NIGHT_CITY;
     let canvas = Canvas::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.fg_dim()))
                 .title(title)
-                .title_style(Style::default().add_modifier(Modifier::BOLD)),
+                .title_style(
+                    Style::default()
+                        .fg(theme.accent())
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .marker(Marker::Braille)
         .x_bounds([0.0, CYCLES])

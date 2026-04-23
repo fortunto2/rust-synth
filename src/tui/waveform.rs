@@ -7,32 +7,40 @@ use ratatui::widgets::canvas::{Canvas, Context, Line};
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
+use super::theme::Theme;
 use crate::audio::engine::{EngineHandle, SCOPE_CAPACITY};
 
 pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle) {
     let samples: Vec<(f32, f32)> = engine.scope.lock().iter().copied().collect();
     let len = samples.len().max(1);
+    let theme = Theme::NIGHT_CITY;
+    let left_color = theme.accent(); // cyan
+    let right_color = theme.fg();    // amber
 
     let canvas = Canvas::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.fg_dim()))
                 .title(" scope · L/R ")
-                .title_style(Style::default().add_modifier(Modifier::BOLD)),
+                .title_style(
+                    Style::default()
+                        .fg(theme.accent())
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .marker(Marker::Braille)
         .x_bounds([0.0, SCOPE_CAPACITY as f64])
         .y_bounds([-1.2, 1.2])
         .paint(move |ctx| {
-            draw_channel(ctx, &samples, |s| s.0, Color::Cyan, len);
-            draw_channel(ctx, &samples, |s| s.1, Color::Magenta, len);
-            // Zero line — subtle grid.
+            draw_channel(ctx, &samples, |s| s.0, left_color, len);
+            draw_channel(ctx, &samples, |s| s.1, right_color, len);
             ctx.draw(&Line {
                 x1: 0.0,
                 y1: 0.0,
                 x2: SCOPE_CAPACITY as f64,
                 y2: 0.0,
-                color: Color::DarkGray,
+                color: theme.fg_dim(),
             });
         });
 

@@ -1,11 +1,12 @@
 //! Parameter sliders for the currently-selected track.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Gauge};
 use ratatui::Frame;
 
 use super::app::{AppState, Focus};
+use super::theme::Theme;
 use crate::audio::engine::EngineHandle;
 use crate::audio::preset::{lfo_target_name, LFO_TARGETS};
 
@@ -16,10 +17,11 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     };
     let s = track.params.snapshot();
 
+    let theme = Theme::NIGHT_CITY;
     let focus_style = if app.focus == Focus::Params {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme.accent())
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(theme.fg_dim())
     };
     let outer = Block::default()
         .borders(Borders::ALL)
@@ -59,9 +61,9 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     for (i, ((name, v, label), row)) in items.iter().zip(rows.iter()).enumerate() {
         let selected = i == app.selected_param && app.focus == Focus::Params;
         let style = if selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme.accent()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Gray)
+            Style::default().fg(theme.fg())
         };
         let arrow = if selected { "▶ " } else { "  " };
         let g = Gauge::default()

@@ -23,6 +23,10 @@ pub struct PresetFile {
     pub brightness: f32,
     #[serde(default)]
     pub scale_mode: f32,
+    #[serde(default)]
+    pub chord_bank: f32,
+    #[serde(default)]
+    pub chord_index: f32,
     pub tracks: Vec<TrackPreset>,
 }
 
@@ -87,6 +91,8 @@ pub fn save(dir: &Path, engine: &EngineHandle) -> Result<PathBuf> {
         master_gain: engine.global.master_gain.value(),
         brightness: engine.global.brightness.value(),
         scale_mode: engine.global.scale_mode.value(),
+        chord_bank: engine.global.chord_bank.value(),
+        chord_index: engine.global.chord_index.value(),
         tracks: tracks_guard
             .iter()
             .map(|t| {
@@ -132,6 +138,8 @@ pub fn load(path: &Path, engine: &EngineHandle) -> Result<usize> {
     engine.global.master_gain.set_value(preset.master_gain.clamp(0.0, 1.5));
     engine.global.brightness.set_value(preset.brightness.clamp(0.0, 1.0));
     engine.global.scale_mode.set_value(preset.scale_mode.clamp(0.0, 2.0));
+    engine.global.chord_bank.set_value(preset.chord_bank.clamp(0.0, 2.0));
+    engine.global.chord_index.set_value(preset.chord_index.clamp(0.0, 3.0));
 
     let tracks_guard = engine.tracks.lock();
     let mut applied = 0;

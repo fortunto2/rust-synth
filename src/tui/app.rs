@@ -730,8 +730,12 @@ fn adjust(track: &Track, app: &AppState, sign: f32) {
     }
 }
 
+/// `a` activates either the currently-selected slot (if muted) or the
+/// first muted slot after it. Either way the cursor lands on the slot
+/// that just came alive, and a status line confirms which voice fired.
 fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     let tracks = engine.tracks.lock();
+
     let root = tracks
         .iter()
         .find(|t| t.params.mute.value() < 0.5)
@@ -739,15 +743,22 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
         .unwrap_or(55.0);
     let scale = golden_pentatonic(root);
 
-    let Some((idx, track)) = tracks
-        .iter()
-        .enumerate()
-        .find(|(_, t)| t.params.mute.value() > 0.5)
-    else {
+    // Prefer the selected slot if muted; otherwise first muted after it,
+    // wrapping back to the start.
+    let n = tracks.len();
+    let sel = app.selected_track;
+    let target = (0..n)
+        .map(|k| (sel + k) % n)
+        .find(|&i| tracks[i].params.mute.value() > 0.5);
+    let Some(idx) = target else {
+        drop(tracks);
+        app.set_status("no dormant slots — press d to kill one first".to_string());
         return;
     };
+
+    let track = &tracks[idx];
     let p = &track.params;
-    let note = scale[(rand_u32(&mut app.rng_seed, scale.len() as u32)) as usize];
+    let note = scale[rand_u32(&mut app.rng_seed, scale.len() as u32) as usize];
     p.freq.set_value(note);
     p.mute.set_value(0.0);
     p.gain.set_value(0.28 + 0.15 * rand_f32(&mut app.rng_seed).abs());
@@ -759,9 +770,13 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     } else {
         p.pulse_depth.set_value(0.2 * rand_f32(&mut app.rng_seed).abs());
     }
-    // Move selection to the newly activated slot but stay in Tracks
-    // focus — the user just wanted to add a voice, not leave the list.
+    let kind_label = track.kind.label();
+    drop(tracks);
+
     app.selected_track = idx;
+    app.set_status(format!(
+        "activated slot {idx}: {kind_label} @ {note:.0} Hz"
+    ));
 }
 
 fn randomize_track(p: &TrackParams, seed: &mut u64) {

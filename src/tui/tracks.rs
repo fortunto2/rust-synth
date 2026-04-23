@@ -17,10 +17,13 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
             let snap = t.params.snapshot();
             let marker = if i == app.selected_track { "▶" } else { " " };
             let status = if snap.muted { "·" } else { "●" };
-            let gain_bar = bar(snap.gain * (if snap.muted { 0.0 } else { 1.0 }), 10);
+            let gain_bar = bar(snap.gain * (if snap.muted { 0.0 } else { 1.0 }), 8);
+            // Always show the preset kind so the user can see what each
+            // slot is — both active ("● SuperSaw") and dormant
+            // ("· SuperSaw" after the activation rename).
+            let label = t.kind.label();
             let line = format!(
-                "{marker} {status} {name:<14} {bar} {f:>5.1}Hz",
-                name = t.name,
+                "{marker} {status} {label:<10} {bar} {f:>5.0}Hz",
                 bar = gain_bar,
                 f = snap.freq,
             );

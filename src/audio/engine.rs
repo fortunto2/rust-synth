@@ -224,19 +224,20 @@ pub fn default_track_set() -> Vec<Track> {
     let mut tracks = Vec::with_capacity(MAX_TRACKS);
 
     // Four active voices — full ambient layout by default.
-    tracks.push(Track::new(0, "Pad · root",   PresetKind::PadZimmer, golden_freq(root, 0)));
-    tracks.push(Track::new(1, "Bass",         PresetKind::BassPulse, golden_freq(root, 0)));
-    tracks.push(Track::new(2, "Heartbeat",    PresetKind::Heartbeat, golden_freq(root, 0)));
-    tracks.push(Track::new(3, "Sub Drone",    PresetKind::DroneSub,  golden_freq(root, -1)));
-    // Drone starts a touch quieter so it sits under the bass on launch.
+    tracks.push(Track::new(0, "Pad",       PresetKind::PadZimmer, golden_freq(root, 0)));
+    tracks.push(Track::new(1, "Bass",      PresetKind::BassPulse, golden_freq(root, 0)));
+    tracks.push(Track::new(2, "Heartbeat", PresetKind::Heartbeat, golden_freq(root, 0)));
+    tracks.push(Track::new(3, "Drone",     PresetKind::DroneSub,  golden_freq(root, -1)));
     tracks[3].params.gain.set_value(0.32);
     tracks[3].params.reverb_mix.set_value(0.7);
 
-    // Dormant slots — `a` activates the next one.
-    tracks.push(Track::dormant(4, "— empty",  PresetKind::Shimmer,   golden_freq(root, 1)));
-    tracks.push(Track::dormant(5, "— empty",  PresetKind::BassPulse, golden_freq(root, -1)));
-    tracks.push(Track::dormant(6, "— empty",  PresetKind::Shimmer,   golden_freq(root, 2)));
-    tracks.push(Track::dormant(7, "— empty",  PresetKind::PadZimmer, golden_freq(root, 1)));
+    // Dormant slots — one per remaining preset kind so `a` shows every
+    // available voice. Names mirror the kind label; when activated the
+    // user immediately knows what they just turned on.
+    tracks.push(Track::dormant(4, "Shimmer",  PresetKind::Shimmer,  golden_freq(root, 1)));
+    tracks.push(Track::dormant(5, "Bell",     PresetKind::Bell,     golden_freq(root, 2)));
+    tracks.push(Track::dormant(6, "SuperSaw", PresetKind::SuperSaw, golden_freq(root, -2)));
+    tracks.push(Track::dormant(7, "Pluck",    PresetKind::PluckSaw, golden_freq(root, 1)));
 
     tracks
 }

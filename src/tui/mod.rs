@@ -7,5 +7,6 @@ pub mod pattern;
 pub mod tracks;
 pub mod trajectory;
 pub mod waveform;
+pub mod waveshape;
 
 pub use app::{run as run_tui, AppState, Focus};

@@ -383,7 +383,7 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(rows[3]);
     super::waveform::render(f, mid[0], engine);
-    super::trajectory::render(f, mid[1], engine, app);
+    super::waveshape::render(f, mid[1], engine, app);
 
     let body = Layout::default()
         .direction(Direction::Horizontal)

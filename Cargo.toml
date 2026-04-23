@@ -1,0 +1,54 @@
+[package]
+name = "rust-synth"
+version = "0.1.0"
+edition = "2021"
+description = "Terminal modular ambient synthesizer — FunDSP + Ratatui"
+license = "MIT"
+authors = ["Rustam <info@superduperai.co>"]
+
+[[bin]]
+name = "rust-synth"
+path = "src/main.rs"
+
+[[bin]]
+name = "rust-synth-render"
+path = "cli/main.rs"
+
+[lib]
+name = "rust_synth"
+path = "src/lib.rs"
+
+[dependencies]
+# DSP core — graph notation, oscillators, filters, reverb
+fundsp = "0.20"
+
+# Audio I/O
+cpal = "0.15"
+
+# Offline WAV render (CLI)
+hound = "3.5"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Errors + logging
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Shared state
+parking_lot = "0.12"
+
+[dev-dependencies]
+approx = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true

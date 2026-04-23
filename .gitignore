@@ -1,0 +1,23 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+*.pdb
+
+# Rendered audio
+/out
+*.wav
+!docs/**/*.wav
+
+# Profiling
+trace.json
+*.profraw
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log

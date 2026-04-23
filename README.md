@@ -5,8 +5,27 @@ drones, kick patterns and evolving textures — driven by math formulas
 (sigmoid, perlin, euclidean, golden ratio, game of life) inside FunDSP
 closures. No GUI, no DAW. Ratatui TUI on top of cpal audio output.
 
+## Install
+
+### macOS — Homebrew (Apple Silicon)
+
+```sh
+brew install fortunto2/tap/rust-synth
+rust-synth
 ```
+
+### Build from source (any platform)
+
+```sh
+git clone https://github.com/fortunto2/rust-synth
+cd rust-synth
 cargo run --release
+```
+
+Or via Homebrew `--head` to build from latest main:
+
+```sh
+brew install --head fortunto2/tap/rust-synth
 ```
 
 ![rust-synth](docs/screenshot.png)

@@ -18,6 +18,8 @@ pub struct Genome<'a> {
     pub resonance: &'a Shared,
     pub reverb_mix: &'a Shared,
     pub pulse_depth: &'a Shared,
+    pub pattern_hits: &'a Shared,
+    pub pattern_rotation: &'a Shared,
 }
 
 /// Mutate a single gene slot. `strength` in [0, 1]:
@@ -51,6 +53,14 @@ pub fn mutate(g: &Genome, seed: &mut u64, strength: f32) {
 
     let pulse = (g.pulse_depth.value() + s * 0.2 * rand_f32(seed)).clamp(0.0, 1.0);
     g.pulse_depth.set_value(pulse);
+
+    // Pattern drift — drum voices get rhythmic variety. Non-drum voices
+    // still have these Shared values; the preset just ignores them.
+    // Strength 1.0 → up to ±3 hits, ±4 rotation; scaled by s.
+    let hits = (g.pattern_hits.value() + s * 3.0 * rand_f32(seed)).clamp(1.0, 11.0);
+    g.pattern_hits.set_value(hits);
+    let rot = (g.pattern_rotation.value() + s * 4.0 * rand_f32(seed)).rem_euclid(16.0);
+    g.pattern_rotation.set_value(rot);
 }
 
 /// Uniform crossover — each gene comes from `a` or `b` with 50/50 chance.
@@ -70,6 +80,12 @@ pub fn crossover(a: &Genome, b: &Genome, seed: &mut u64) {
     }
     if rand_u32(seed, 2) == 0 {
         a.pulse_depth.set_value(b.pulse_depth.value());
+    }
+    if rand_u32(seed, 2) == 0 {
+        a.pattern_hits.set_value(b.pattern_hits.value());
+    }
+    if rand_u32(seed, 2) == 0 {
+        a.pattern_rotation.set_value(b.pattern_rotation.value());
     }
     // Snap freq after crossover.
     let cur = a.freq.value();

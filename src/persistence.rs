@@ -42,7 +42,15 @@ pub struct TrackPreset {
     pub reverb_mix: f32,
     pub supermass: f32,
     pub pulse_depth: f32,
+    #[serde(default = "default_hits")]
+    pub pattern_hits: f32,
+    #[serde(default)]
+    pub pattern_rotation: f32,
     pub mute: bool,
+}
+
+fn default_hits() -> f32 {
+    4.0
 }
 
 pub fn save(dir: &Path, engine: &EngineHandle) -> Result<PathBuf> {
@@ -73,6 +81,8 @@ pub fn save(dir: &Path, engine: &EngineHandle) -> Result<PathBuf> {
                     reverb_mix: s.reverb_mix,
                     supermass: s.supermass,
                     pulse_depth: s.pulse_depth,
+                    pattern_hits: s.pattern_hits,
+                    pattern_rotation: s.pattern_rotation,
                     mute: s.muted,
                 }
             })
@@ -114,6 +124,9 @@ pub fn load(path: &Path, engine: &EngineHandle) -> Result<usize> {
         p.reverb_mix.set_value(snap.reverb_mix);
         p.supermass.set_value(snap.supermass);
         p.pulse_depth.set_value(snap.pulse_depth);
+        p.pattern_hits.set_value(snap.pattern_hits.clamp(0.0, 16.0));
+        p.pattern_rotation
+            .set_value(snap.pattern_rotation.rem_euclid(16.0));
         p.mute.set_value(if snap.mute { 1.0 } else { 0.0 });
         applied += 1;
     }

@@ -29,7 +29,9 @@ use crate::audio::track::{Track, TrackParams};
 use crate::math::genetic::{crossover, mutate, Genome};
 use crate::math::harmony::{golden_pentatonic, rand_f32, rand_u32};
 use crate::math::life::Life;
+use crate::math::rhythm;
 use crate::{persistence, recording};
+use std::sync::atomic::Ordering;
 
 const LIFE_ROWS: usize = 8;
 const LIFE_COLS: usize = 22;
@@ -132,8 +134,11 @@ fn run_loop<B: ratatui::backend::Backend>(
     let mut last = Instant::now();
 
     loop {
-        // Advance Life/evolution on beat boundaries before drawing.
         advance_beat_sync(&mut app, engine);
+        // Recompute Euclidean pattern bits from hits + rotation so slider
+        // tweaks or auto-evolve mutations are reflected at the next
+        // audio-thread read (next sample, ~20 µs).
+        recompute_patterns(engine);
         terminal.draw(|f| ui(f, engine, &app))?;
 
         let timeout = tick.saturating_sub(last.elapsed());
@@ -216,6 +221,28 @@ fn reset_life_mods(engine: &EngineHandle) {
     }
 }
 
+/// Translate hits + rotation sliders to a fresh 16-step bitmask.
+/// Cheap (a dozen shifts + ORs per track), safe to run every frame.
+fn recompute_patterns(engine: &EngineHandle) {
+    let tracks = engine.tracks.lock();
+    for track in tracks.iter() {
+        let hits = track
+            .params
+            .pattern_hits
+            .value()
+            .round()
+            .clamp(0.0, rhythm::STEPS as f32) as u32;
+        let rotation = track
+            .params
+            .pattern_rotation
+            .value()
+            .round()
+            .clamp(0.0, (rhythm::STEPS - 1) as f32) as u32;
+        let bits = rhythm::euclidean_bits(hits, rotation);
+        track.params.pattern_bits.store(bits, Ordering::Relaxed);
+    }
+}
+
 /// Seed Life cells from current audio state. One row per track; column
 /// follows beat phase so trails scroll across the grid.
 fn seed_from_audio(app: &mut AppState, engine: &EngineHandle, cur_beat: i64) {
@@ -285,6 +312,8 @@ fn genome_of(p: &TrackParams) -> Genome<'_> {
         resonance: &p.resonance,
         reverb_mix: &p.reverb_mix,
         pulse_depth: &p.pulse_depth,
+        pattern_hits: &p.pattern_hits,
+        pattern_rotation: &p.pattern_rotation,
     }
 }
 
@@ -297,7 +326,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // header
-            Constraint::Length(10),     // tempo + life (8 rows data + 2 border)
+            Constraint::Length(10),     // tempo + life
+            Constraint::Length(7),      // pattern sequencer (1 row data + title/hint)
             Constraint::Length(12),     // scope + trajectory
             Constraint::Min(10),        // tracks + params + formula
             Constraint::Length(3),      // help
@@ -346,10 +376,12 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::beats::render(f, top[0], engine);
     super::life::render(f, top[1], engine, app);
 
+    super::pattern::render(f, rows[2], engine, app);
+
     let mid = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[2]);
+        .split(rows[3]);
     super::waveform::render(f, mid[0], engine);
     super::trajectory::render(f, mid[1], engine, app);
 
@@ -360,18 +392,18 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
             Constraint::Percentage(36),
             Constraint::Percentage(32),
         ])
-        .split(rows[3]);
+        .split(rows[4]);
     super::tracks::render(f, body[0], engine, app);
     super::params::render(f, body[1], engine, app);
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · r rand · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · {/} brt · [/] mstr · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · e/E mut · x cross · S/s super · w save · l load · c REC · ,/. bpm · {/} brt · [/] mstr · q quit ",
+        Focus::Tracks => " ↑↓trk·Enter→p · a add · d kill · m mute · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · ,/. bpm · {/} brt · q quit ",
     })
     .block(Block::default().borders(Borders::ALL))
     .style(Style::default().fg(Color::Gray));
-    f.render_widget(help, rows[4]);
+    f.render_widget(help, rows[5]);
 }
 
 fn on_off(b: bool) -> &'static str {
@@ -465,6 +497,22 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
             if let Some(track) = tracks.get(app.selected_track) {
                 track.params.supermass.set_value(0.0);
             }
+            return;
+        }
+        KeyCode::Char('h') => {
+            pattern_hits_nudge(engine, app, -1.0);
+            return;
+        }
+        KeyCode::Char('H') => {
+            pattern_hits_nudge(engine, app, 1.0);
+            return;
+        }
+        KeyCode::Char('p') => {
+            pattern_rot_nudge(engine, app, -1.0);
+            return;
+        }
+        KeyCode::Char('P') => {
+            pattern_rot_nudge(engine, app, 1.0);
             return;
         }
         KeyCode::Char('w') => {
@@ -592,6 +640,23 @@ fn brightness_nudge(engine: &EngineHandle, delta: f32) {
     engine.global.brightness.set_value(v);
 }
 
+fn pattern_hits_nudge(engine: &EngineHandle, app: &AppState, delta: f32) {
+    let tracks = engine.tracks.lock();
+    if let Some(track) = tracks.get(app.selected_track) {
+        let v = (track.params.pattern_hits.value() + delta).clamp(0.0, rhythm::STEPS as f32);
+        track.params.pattern_hits.set_value(v);
+    }
+}
+
+fn pattern_rot_nudge(engine: &EngineHandle, app: &AppState, delta: f32) {
+    let tracks = engine.tracks.lock();
+    if let Some(track) = tracks.get(app.selected_track) {
+        let steps = rhythm::STEPS as f32;
+        let v = (track.params.pattern_rotation.value() + delta).rem_euclid(steps);
+        track.params.pattern_rotation.set_value(v);
+    }
+}
+
 fn adjust(track: &Track, app: &AppState, sign: f32) {
     let p = &track.params;
     match app.selected_param {
@@ -647,8 +712,9 @@ fn activate_next(engine: &EngineHandle, app: &mut AppState) {
     } else {
         p.pulse_depth.set_value(0.2 * rand_f32(&mut app.rng_seed).abs());
     }
+    // Move selection to the newly activated slot but stay in Tracks
+    // focus — the user just wanted to add a voice, not leave the list.
     app.selected_track = idx;
-    app.focus = Focus::Params;
 }
 
 fn randomize_track(p: &TrackParams, seed: &mut u64) {

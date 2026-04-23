@@ -2,6 +2,7 @@ pub mod genetic;
 pub mod harmony;
 pub mod life;
 pub mod pulse;
+pub mod rhythm;
 pub mod rnd;
 pub mod sigmoid;
 

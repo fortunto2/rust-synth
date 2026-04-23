@@ -1,8 +1,11 @@
 //! Track = one voice in the mix.
 
 use fundsp::hacker::*;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 
 use super::preset::PresetKind;
+use crate::math::rhythm;
 
 #[derive(Clone)]
 pub struct TrackParams {
@@ -17,11 +20,16 @@ pub struct TrackParams {
     pub pulse_depth: Shared,
     pub mute: Shared,
     pub freq: Shared,
-    /// Continuous Life-density modulation in [0.0, 1.0]. Updated every
-    /// beat by the TUI loop from `life.row_alive_count(i)`. Drives the
-    /// gate multiplier so tracks with dense rows swell and thinning
-    /// rows fade.
     pub life_mod: Shared,
+    /// 16-step Euclidean rhythm pattern as a bitmask. Drum presets
+    /// (currently only Heartbeat) read this every sample to decide
+    /// whether to fire on the current step. Recomputed in the TUI loop
+    /// from `pattern_hits` + `pattern_rotation`.
+    pub pattern_bits: Arc<AtomicU32>,
+    /// Hits per 16 steps, [0.0, 16.0]. Fed into euclidean_bits().
+    pub pattern_hits: Shared,
+    /// Pattern rotation, [0.0, 15.0].
+    pub pattern_rotation: Shared,
 }
 
 impl TrackParams {
@@ -39,6 +47,9 @@ impl TrackParams {
             mute: shared(0.0),
             freq: shared(freq),
             life_mod: shared(1.0),
+            pattern_bits: Arc::new(AtomicU32::new(rhythm::euclidean_bits(4, 0))),
+            pattern_hits: shared(4.0),
+            pattern_rotation: shared(0.0),
         }
     }
 
@@ -64,6 +75,9 @@ impl TrackParams {
             pulse_depth: self.pulse_depth.value(),
             freq: self.freq.value(),
             life_mod: self.life_mod.value(),
+            pattern_bits: self.pattern_bits.load(std::sync::atomic::Ordering::Relaxed),
+            pattern_hits: self.pattern_hits.value(),
+            pattern_rotation: self.pattern_rotation.value(),
             muted: self.mute.value() > 0.5,
         }
     }
@@ -81,6 +95,9 @@ pub struct TrackSnapshot {
     pub pulse_depth: f32,
     pub freq: f32,
     pub life_mod: f32,
+    pub pattern_bits: u32,
+    pub pattern_hits: f32,
+    pub pattern_rotation: f32,
     pub muted: bool,
 }
 

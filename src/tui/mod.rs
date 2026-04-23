@@ -3,6 +3,7 @@ pub mod beats;
 pub mod formula;
 pub mod life;
 pub mod params;
+pub mod pattern;
 pub mod tracks;
 pub mod trajectory;
 pub mod waveform;

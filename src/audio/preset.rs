@@ -7,8 +7,11 @@
 
 use fundsp::hacker::*;
 
+use std::sync::atomic::Ordering;
+
 use super::track::TrackParams;
-use crate::math::pulse::{beat_phase, pulse_decay, pulse_sine};
+use crate::math::pulse::{pulse_decay, pulse_sine};
+use crate::math::rhythm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresetKind {
@@ -286,37 +289,76 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
         )
 }
 
-// ── Heartbeat: 3-layer kick drum ──
-// Layers are all BPM-locked; they collapse to a single perceived hit.
-//   body (sine, freq·0.7..2.2 pitch sweep, medium decay) — the punch
-//   sub  (sine at freq·0.5, slow decay) — the boom tail
-//   click (HP-filtered brown noise, very fast decay) — transient snap
+// ── Heartbeat: 3-layer kick drum with Euclidean 16-step pattern ──
+// Every layer fires only on active pattern steps (step resolution = 4
+// per beat). Envelopes are step-length (~1/4 beat). Pattern bitmask is
+// read with an atomic Relaxed load — lock-free, ~1 ns per sample.
 fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
     let bpm = g.bpm.clone();
 
-    // Body — pitch-swept sine.
+    // Body — pitch-swept sine (pitch drop happens only within active steps).
     let bpm_body_f = bpm.clone();
     let freq_body = p.freq.clone();
+    let pat_body_f = p.pattern_bits.clone();
     let body_osc = lfo(move |t: f64| {
+        let bpm_v = bpm_body_f.value() as f64;
+        let bits = pat_body_f.load(Ordering::Relaxed);
+        let (active, phi) = rhythm::step_is_active(bits, t, bpm_v);
         let base = freq_body.value() as f64;
-        let phi = beat_phase(t, bpm_body_f.value() as f64);
-        let drop = (-phi * 30.0).exp();
-        base * (0.7 + 1.5 * drop)
+        if active {
+            let drop = (-phi * 40.0).exp();
+            base * (0.7 + 1.5 * drop)
+        } else {
+            // No hit — hold the osc at its base so there is no phase
+            // pop when the next step arrives.
+            base
+        }
     }) >> sine();
+
     let bpm_body_e = bpm.clone();
-    let body_env = lfo(move |t: f64| pulse_decay(t, bpm_body_e.value() as f64, 6.0));
+    let pat_body_e = p.pattern_bits.clone();
+    let body_env = lfo(move |t: f64| {
+        let bpm_v = bpm_body_e.value() as f64;
+        let bits = pat_body_e.load(Ordering::Relaxed);
+        let (active, phi) = rhythm::step_is_active(bits, t, bpm_v);
+        if active {
+            (-phi * 4.0).exp()
+        } else {
+            0.0
+        }
+    });
     let body = body_osc * body_env * 0.85;
 
-    // Sub — constant low sine with slow decay.
+    // Sub — low sine, slower decay bleeds across the step boundary.
     let freq_sub = p.freq.clone();
     let sub_osc = lfo(move |_t: f64| freq_sub.value() as f64 * 0.5) >> sine();
     let bpm_sub_e = bpm.clone();
-    let sub_env = lfo(move |t: f64| pulse_decay(t, bpm_sub_e.value() as f64, 3.2));
+    let pat_sub = p.pattern_bits.clone();
+    let sub_env = lfo(move |t: f64| {
+        let bpm_v = bpm_sub_e.value() as f64;
+        let bits = pat_sub.load(Ordering::Relaxed);
+        let (active, phi) = rhythm::step_is_active(bits, t, bpm_v);
+        if active {
+            (-phi * 1.5).exp()
+        } else {
+            0.0
+        }
+    });
     let sub = sub_osc * sub_env * 0.45;
 
-    // Click — short filtered-noise burst for transient snap.
+    // Click — very short burst on every active step.
     let bpm_click = bpm.clone();
-    let click_env = lfo(move |t: f64| pulse_decay(t, bpm_click.value() as f64, 55.0));
+    let pat_click = p.pattern_bits.clone();
+    let click_env = lfo(move |t: f64| {
+        let bpm_v = bpm_click.value() as f64;
+        let bits = pat_click.load(Ordering::Relaxed);
+        let (active, phi) = rhythm::step_is_active(bits, t, bpm_v);
+        if active {
+            (-phi * 40.0).exp()
+        } else {
+            0.0
+        }
+    });
     let click = (brown() >> highpass_hz(1800.0, 0.5)) * click_env * 0.12;
 
     let kick = body + sub + click;

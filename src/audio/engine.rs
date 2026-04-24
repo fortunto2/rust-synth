@@ -42,7 +42,14 @@ pub const PER_TRACK_SCOPE_CAPACITY: usize = 256;
 pub const PER_TRACK_SCOPE_DECIMATION: usize = 16;
 
 pub type ScopeBuffer = Arc<Scope>;
-pub type SharedNet = Arc<Mutex<Net>>;
+
+/// Dropbox for handing a freshly-built `Net` to the audio callback
+/// without ever blocking it. `rebuild_graph` stores `Some(net)`; the
+/// callback uses `try_lock` at the top of each buffer and takes the
+/// pending net out if the slot is free. If the slot is contended (TUI
+/// mid-write) the callback keeps using its active net this buffer —
+/// one buffer = ~10 ms latency on preset switch, imperceptible.
+pub type PendingNet = Arc<Mutex<Option<Net>>>;
 
 pub struct EngineHandle {
     pub tracks: Arc<Mutex<Vec<Track>>>,
@@ -54,9 +61,8 @@ pub struct EngineHandle {
     pub per_track_scopes: Vec<ScopeBuffer>,
     pub phase_clock: Shared,
     pub recorder: Arc<RecorderState>,
-    per_track_nets: Vec<SharedNet>,
-    #[allow(dead_code)] // Kept alive for the audio callback; TUI never touches.
-    master_bus_net: SharedNet,
+    /// TUI writes here via `rebuild_graph`; audio callback drains.
+    per_track_pending: Vec<PendingNet>,
     _stream: Stream,
 }
 
@@ -91,32 +97,39 @@ impl AudioEngine {
         let tracks = Arc::new(Mutex::new(initial_tracks));
         let recorder = RecorderState::new(sample_rate as u32);
 
-        // Build per-track nets.
-        let per_track_nets: Vec<SharedNet> = {
+        // Build initial per-track nets; ownership moves into the
+        // audio callback closure. TUI never touches these directly —
+        // rebuilds go through `per_track_pending`.
+        let initial_nets: Vec<Net> = {
             let tracks_ref = tracks.lock();
             tracks_ref
                 .iter()
                 .map(|t| {
                     let mut n = Preset::build(t.kind, &t.params, &global);
                     n.set_sample_rate(sample_rate as f64);
-                    Arc::new(Mutex::new(n))
+                    n
                 })
                 .collect()
         };
 
+        let per_track_pending: Vec<PendingNet> = (0..MAX_TRACKS)
+            .map(|_| Arc::new(Mutex::new(None)))
+            .collect();
+
         // Build master bus once. brightness lives inside via Shared so
-        // we never need to rebuild this graph.
-        let mut mb = build_master_bus(global.brightness.clone());
-        mb.set_sample_rate(sample_rate as f64);
-        let master_bus_net: SharedNet = Arc::new(Mutex::new(mb));
+        // we never rebuild this graph — ownership moves into the
+        // callback closure.
+        let mut master_bus = build_master_bus(global.brightness.clone());
+        master_bus.set_sample_rate(sample_rate as f64);
 
         let stream = start_stream(
             device,
             config,
             channels,
             sample_rate,
-            per_track_nets.clone(),
-            master_bus_net.clone(),
+            initial_nets,
+            master_bus,
+            per_track_pending.clone(),
             global.master_gain.clone(),
             peak_l.clone(),
             peak_r.clone(),
@@ -136,8 +149,7 @@ impl AudioEngine {
             per_track_scopes,
             phase_clock,
             recorder,
-            per_track_nets,
-            master_bus_net,
+            per_track_pending,
             _stream: stream,
         })
     }
@@ -146,15 +158,15 @@ impl AudioEngine {
 impl EngineHandle {
     /// Rebuild the per-track DSP graphs from the current track list.
     /// Master bus stays — only voices are reconstructed. Called after
-    /// any `track.kind` mutation so the audio callback sees the new
-    /// voice on its next buffer.
+    /// any `track.kind` mutation; new nets land in the pending dropbox
+    /// and the audio callback picks them up on its next buffer.
     pub fn rebuild_graph(&self) {
         let tracks = self.tracks.lock();
         for (i, track) in tracks.iter().enumerate() {
-            if let Some(slot) = self.per_track_nets.get(i) {
+            if let Some(slot) = self.per_track_pending.get(i) {
                 let mut new_net = Preset::build(track.kind, &track.params, &self.global);
                 new_net.set_sample_rate(self.sample_rate as f64);
-                *slot.lock() = new_net;
+                *slot.lock() = Some(new_net);
             }
         }
     }
@@ -166,8 +178,9 @@ fn start_stream(
     config: StreamConfig,
     channels: usize,
     sample_rate: f32,
-    per_track_nets: Vec<SharedNet>,
-    master_bus_net: SharedNet,
+    mut nets: Vec<Net>,
+    mut master_bus: Net,
+    pending: Vec<PendingNet>,
     master: Shared,
     peak_l: Shared,
     peak_r: Shared,
@@ -183,21 +196,24 @@ fn start_stream(
     let dt: f64 = 1.0 / sample_rate as f64;
     let mut t: f64 = 0.0;
     let mut decim = 0usize;
-    let mut per_track_decim = vec![0usize; per_track_nets.len()];
-    let n_tracks = per_track_nets.len();
+    let n_tracks = nets.len();
+    let mut per_track_decim = vec![0usize; n_tracks];
 
     let stream = device.build_output_stream(
         &config,
         move |data: &mut [f32], _| {
             let m = master.value();
 
-            // Lock every graph for the whole buffer. Rebuilds happen on
-            // the TUI thread behind these same locks; contention window
-            // is just a pointer swap (microseconds).
-            // TODO[#1]: migrate per_track_nets to arc-swap so the
-            // callback does zero locking.
-            let mut net_guards: Vec<_> = per_track_nets.iter().map(|n| n.lock()).collect();
-            let mut mb_guard = master_bus_net.lock();
+            // Pick up any nets the TUI rebuilt. try_lock: if the TUI is
+            // mid-write on this slot we skip for this buffer and keep
+            // using the current net (~10 ms delay, imperceptible).
+            for (i, slot) in pending.iter().enumerate() {
+                if let Some(mut guard) = slot.try_lock() {
+                    if let Some(new_net) = guard.take() {
+                        nets[i] = new_net;
+                    }
+                }
+            }
 
             for frame in data.chunks_mut(channels) {
                 // Per-track: tick each voice independently, capture its
@@ -205,7 +221,7 @@ fn start_stream(
                 let mut sum_l = 0.0f32;
                 let mut sum_r = 0.0f32;
                 for i in 0..n_tracks {
-                    let (voice_l, voice_r) = net_guards[i].get_stereo();
+                    let (voice_l, voice_r) = nets[i].get_stereo();
                     sum_l += voice_l;
                     sum_r += voice_r;
                     // Per-track scope decimation — one sample every N
@@ -220,7 +236,7 @@ fn start_stream(
                 // the final stereo pair.
                 let input = [sum_l, sum_r];
                 let mut output = [0.0f32; 2];
-                mb_guard.tick(&input, &mut output);
+                master_bus.tick(&input, &mut output);
                 let mut l = output[0];
                 let mut r = output[1];
 
@@ -241,9 +257,6 @@ fn start_stream(
 
                 t += dt;
             }
-
-            drop(net_guards);
-            drop(mb_guard);
 
             peak_l.set_value(env_l);
             peak_r.set_value(env_r);

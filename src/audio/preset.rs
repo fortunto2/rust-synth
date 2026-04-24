@@ -89,7 +89,7 @@ pub struct GlobalParams {
     pub chord_bank: Shared,
     /// Live side-chain kick envelope, 0..1. Heartbeat writes it every
     /// sample from its own amplitude envelope; other voices read it and
-    /// duck their gate by `(1 - SIDECHAIN_DUCK · kick_env)` so the kick
+    /// duck their gate by `1 - VoiceGate::duck_amount · kick_env` so the kick
     /// feels big without needing to be loud. Lock-free atomic by design.
     pub kick_sidechain: Shared,
     /// Envelope for the current chord — 0 at chord change, rising to 1
@@ -134,10 +134,34 @@ pub fn chord_offset(bank: u32, idx: u32) -> f64 {
 pub const MASTER_SHELF_HZ: f64 = 3500.0;
 pub const MIN_SHELF_GAIN: f64 = 0.2;
 
-/// Side-chain duck depth for sustained voices. Kick envelope scales
-/// `1 - DUCK * kick`. 0.22 leaves plenty of pad through; above ~0.35
-/// the mix starts to feel gated-all-the-time.
-pub const SIDECHAIN_DUCK: f64 = 0.22;
+/// How a voice responds to the kick side-chain + chord-change swell.
+#[derive(Clone, Copy, Debug)]
+pub enum VoiceGate {
+    /// Sustained voice (pads, drones, saws, bells). Full kick duck +
+    /// partial chord-change swell so each chord "breathes in".
+    Sustained,
+    /// The kick itself. No duck (kick drives everyone else), no swell
+    /// — percussive transients must stay crisp.
+    Kick,
+    /// Percussive but not the kick (plucks). Lighter duck, no swell.
+    Pluck,
+}
+
+impl VoiceGate {
+    /// Side-chain duck depth: gate is scaled by `1 - DUCK * kick_env`.
+    fn duck_amount(self) -> f64 {
+        match self {
+            VoiceGate::Sustained => 0.22, // plenty through; >0.35 feels gated-all-the-time
+            VoiceGate::Kick => 0.0,
+            VoiceGate::Pluck => 0.2, // sits under the kick
+        }
+    }
+
+    /// Whether the voice participates in the chord-change swell.
+    fn uses_chord_swell(self) -> bool {
+        matches!(self, VoiceGate::Sustained)
+    }
+}
 
 /// Map brightness [0..1] → shelf amplitude gain [MIN..1.0] linearly.
 #[inline]
@@ -405,9 +429,10 @@ fn stereo_gate_voiced(
     lb: LfoBundle,
     kick_sc: Shared,
     chord_attack_env: Shared,
-    duck_amount: f64,
-    chord_attack_enabled: bool,
+    voicing: VoiceGate,
 ) -> Net {
+    let duck_amount = voicing.duck_amount();
+    let uses_swell = voicing.uses_chord_swell();
     let raw = lfo(move |t: f64| {
         let g_raw = (gain.value() * (1.0 - mute.value())) as f64;
         let g = lb.apply(g_raw, LFO_GAIN, t, |b, m| (b * (1.0 + m * 0.6)).max(0.0));
@@ -420,7 +445,7 @@ fn stereo_gate_voiced(
         let duck = 1.0 - duck_amount * kick;
         // Partial chord-change swell — bottom at 0.65, not 0. A full
         // dip leaves an audible gap on every chord boundary.
-        let swell = if chord_attack_enabled {
+        let swell = if uses_swell {
             let env = chord_attack_env.value().clamp(0.0, 1.0) as f64;
             0.65 + 0.35 * env
         } else {
@@ -520,8 +545,7 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            SIDECHAIN_DUCK,
-            true,
+            VoiceGate::Sustained,
         )
 }
 
@@ -575,8 +599,7 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            SIDECHAIN_DUCK,
-            true,
+            VoiceGate::Sustained,
         )
 }
 
@@ -636,8 +659,7 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            SIDECHAIN_DUCK,
-            true,
+            VoiceGate::Sustained,
         )
 }
 
@@ -757,10 +779,7 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            // Heartbeat is the ducker, not the ducked. No chord swell
-            // either — percussive transients should stay crisp.
-            0.0,
-            false,
+            VoiceGate::Kick,
         )
 }
 
@@ -820,8 +839,7 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            SIDECHAIN_DUCK,
-            true,
+            VoiceGate::Sustained,
         )
 }
 
@@ -881,8 +899,7 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            SIDECHAIN_DUCK,
-            true,
+            VoiceGate::Sustained,
         )
 }
 
@@ -959,8 +976,7 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            SIDECHAIN_DUCK,
-            true,
+            VoiceGate::Sustained,
         )
 }
 
@@ -1045,9 +1061,6 @@ fn pluck_saw(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            // Pluck is percussive — skip the chord swell so each hit
-            // punches. Keep a light duck so it sits under the kick.
-            0.2,
-            false,
+            VoiceGate::Pluck,
         )
 }

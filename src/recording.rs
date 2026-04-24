@@ -1,14 +1,20 @@
-//! Master-output recorder → FLAC (lossless, 24-bit).
+//! Master-output recorder → FLAC / OGG Vorbis.
 //!
-//! The audio callback pushes interleaved L/R samples into a pre-allocated
-//! `Vec<f32>` protected by a `parking_lot::Mutex` (uncontended ≈ 25 ns).
-//! On stop the buffer is moved out and handed to a background thread
-//! that runs the FLAC encoder — UI stays responsive even for long takes.
+//! The audio callback is guarded by an `AtomicBool active` flag so
+//! that, when the user is *not* recording (99% of the time), the
+//! callback does one relaxed atomic load and returns — no lock, no
+//! allocation. Only while recording does it acquire the mutex and
+//! `Vec::push` the sample pair.
+//!
+//! On stop the buffer is moved out under the mutex and handed to a
+//! background encoder thread (FLAC or OGG) so the UI stays responsive
+//! for long takes.
 
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -53,9 +59,14 @@ impl RecordFormat {
 
 /// Handle shared between audio callback and UI thread.
 ///
-/// - Callback: `buffer.lock()` and pushes f32 interleaved samples.
-/// - UI: calls `stop()` to swap out the buffer and spawn encoder.
+/// - Callback hot path: checks `active` (one relaxed atomic load); if
+///   false (not recording) returns immediately without locking.
+/// - UI: calls `stop_and_encode()` to flip the flag, swap out the
+///   buffer, and spawn the encoder thread.
 pub struct RecorderState {
+    /// Fast gate — cleared by stop, set by start. Audio callback reads
+    /// this before doing anything more expensive.
+    active: AtomicBool,
     buffer: Mutex<Option<Vec<f32>>>,
     pub started_at: Mutex<Option<Instant>>,
     pub sample_rate: u32,
@@ -69,6 +80,7 @@ impl RecorderState {
     pub fn new(sample_rate: u32) -> Arc<Self> {
         let max_samples = MAX_MINUTES as usize * 60 * sample_rate as usize * CHANNELS;
         Arc::new(Self {
+            active: AtomicBool::new(false),
             buffer: Mutex::new(None),
             started_at: Mutex::new(None),
             sample_rate,
@@ -78,7 +90,7 @@ impl RecorderState {
     }
 
     pub fn is_recording(&self) -> bool {
-        self.buffer.lock().is_some()
+        self.active.load(Ordering::Relaxed)
     }
 
     pub fn elapsed_seconds(&self) -> f32 {
@@ -94,10 +106,17 @@ impl RecorderState {
             *buf = Some(Vec::with_capacity(self.sample_rate as usize * CHANNELS * 30));
         }
         *self.started_at.lock() = Some(Instant::now());
+        // Flip the flag last — after this store the audio callback will
+        // start taking the lock and pushing samples.
+        self.active.store(true, Ordering::Release);
     }
 
     /// Called from the audio callback for every output frame.
+    #[inline]
     pub fn push_frame(&self, l: f32, r: f32) {
+        if !self.active.load(Ordering::Relaxed) {
+            return;
+        }
         let mut guard = self.buffer.lock();
         if let Some(buf) = guard.as_mut() {
             if buf.len() + 2 <= self.max_samples {
@@ -110,6 +129,10 @@ impl RecorderState {
     /// Stop capture and spawn the encoder thread. Returns target path.
     pub fn stop_and_encode(&self, dir: &Path) -> Result<PathBuf> {
         std::fs::create_dir_all(dir).context("create recordings dir")?;
+        // Flip the flag first — after this the audio callback skips
+        // push_frame entirely, so taking the lock below is guaranteed
+        // uncontended.
+        self.active.store(false, Ordering::Release);
         let samples = self.buffer.lock().take().ok_or_else(|| anyhow!("not recording"))?;
         *self.started_at.lock() = None;
         let format = *self.format.lock();

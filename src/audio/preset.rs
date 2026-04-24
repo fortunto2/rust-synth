@@ -190,8 +190,10 @@ pub fn master_bus(brightness: Shared) -> Net {
     let lp_q_r = lfo(|_t: f64| 0.5_f64);
 
     // Each channel: soft-clip warmth → high-shelf → lowpass.
-    let left = shelf_l >> shape(Softsign(1.2)) >> (pass() | lp_c_l | lp_q_l) >> lowpass();
-    let right = shelf_r >> shape(Softsign(1.2)) >> (pass() | lp_c_r | lp_q_r) >> lowpass();
+    // Softsign amount must stay ≲ 0.3 — above ~1.0 the shaper acts as a
+    // bus compressor and audibly crushes the 0.5-level peak.
+    let left = shelf_l >> shape(Softsign(0.3)) >> (pass() | lp_c_l | lp_q_l) >> lowpass();
+    let right = shelf_r >> shape(Softsign(0.3)) >> (pass() | lp_c_r | lp_q_r) >> lowpass();
     let stereo = left | right;
 
     let chain = stereo >> limiter_stereo(0.001, 0.3);
@@ -416,9 +418,11 @@ fn stereo_gate_voiced(
         // Side-chain ducking — kick drives other voices down.
         let kick = kick_sc.value().clamp(0.0, 1.0) as f64;
         let duck = 1.0 - duck_amount * kick;
-        // Chord swell — 0 at bar-start, rises to 1 over ~0.6 s.
+        // Partial chord-change swell — bottom at 0.65, not 0. A full
+        // dip leaves an audible gap on every chord boundary.
         let swell = if chord_attack_enabled {
-            chord_attack_env.value().clamp(0.0, 1.0) as f64
+            let env = chord_attack_env.value().clamp(0.0, 1.0) as f64;
+            0.65 + 0.35 * env
         } else {
             1.0
         };
@@ -516,7 +520,7 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.4,
+            0.22,
             true,
         )
 }
@@ -571,7 +575,7 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.4,
+            0.22,
             true,
         )
 }
@@ -632,7 +636,7 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.4,
+            0.22,
             true,
         )
 }
@@ -816,7 +820,7 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.4,
+            0.22,
             true,
         )
 }
@@ -877,7 +881,7 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.4,
+            0.22,
             true,
         )
 }
@@ -955,7 +959,7 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.4,
+            0.22,
             true,
         )
 }

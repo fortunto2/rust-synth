@@ -257,14 +257,14 @@ fn push_density_to_tracks(app: &AppState, engine: &EngineHandle) {
     }
 }
 
-/// Ramp the global chord-attack env from 0 → 1 over 0.6 s using
+/// Ramp the global chord-attack env from 0 → 1 over 0.25 s using
 /// smoothstep so the swell sounds musical, not linear.
 fn advance_chord_attack(app: &AppState, engine: &EngineHandle) {
     let Some(started) = app.last_chord_change else {
         return;
     };
     let elapsed = started.elapsed().as_secs_f32();
-    let t = (elapsed / 0.6).clamp(0.0, 1.0);
+    let t = (elapsed / 0.25).clamp(0.0, 1.0);
     let eased = t * t * (3.0 - 2.0 * t);
     engine.global.chord_attack_env.set_value(eased);
 }

@@ -168,11 +168,6 @@ pub fn master_bus(brightness: Shared) -> Net {
     let b_lp_l = brightness.clone();
     let b_lp_r = brightness;
 
-    // ── Tape warmth ── tiny soft-clip before EQ gives the whole mix
-    // the gentle non-linearity that separates "analogue" from "digital".
-    // Softsign(1.2) is mostly transparent; it only bends peaks.
-    let _warm_info = "softsign tape saturation";
-
     // ── Shelf stage ──
     let sh_f_l = lfo(|_t: f64| MASTER_SHELF_HZ);
     let sh_f_r = lfo(|_t: f64| MASTER_SHELF_HZ);
@@ -189,11 +184,11 @@ pub fn master_bus(brightness: Shared) -> Net {
     let lp_q_l = lfo(|_t: f64| 0.5_f64);
     let lp_q_r = lfo(|_t: f64| 0.5_f64);
 
-    // Each channel: soft-clip warmth → high-shelf → lowpass.
-    // Softsign amount must stay ≲ 0.3 — above ~1.0 the shaper acts as a
-    // bus compressor and audibly crushes the 0.5-level peak.
-    let left = shelf_l >> shape(Softsign(0.3)) >> (pass() | lp_c_l | lp_q_l) >> lowpass();
-    let right = shelf_r >> shape(Softsign(0.3)) >> (pass() | lp_c_r | lp_q_r) >> lowpass();
+    // Each channel: high-shelf → lowpass. No soft-clip shaper — Softsign
+    // attenuates signal below unity (e.g. k=1 halves a 0.5 peak) and the
+    // limiter already handles overs.
+    let left = shelf_l >> (pass() | lp_c_l | lp_q_l) >> lowpass();
+    let right = shelf_r >> (pass() | lp_c_r | lp_q_r) >> lowpass();
     let stereo = left | right;
 
     let chain = stereo >> limiter_stereo(0.001, 0.3);

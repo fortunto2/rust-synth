@@ -61,6 +61,7 @@ pub struct AppState {
     pub life: Life,
     pub last_beat_index: i64,
     pub last_bar_index: i64,
+    pub last_chord_change: Option<Instant>,
     pub last_evolve_beat: i64,
     pub evolve_period: u32,
     pub coupling: bool,
@@ -89,6 +90,7 @@ impl AppState {
             life,
             last_beat_index: -1,
             last_bar_index: -1,
+            last_chord_change: None,
             last_evolve_beat: 0,
             evolve_period: DEFAULT_EVOLVE_PERIOD,
             coupling: true,
@@ -148,10 +150,9 @@ fn run_loop<B: ratatui::backend::Backend>(
 
     loop {
         advance_beat_sync(&mut app, engine);
-        // Recompute Euclidean pattern bits from hits + rotation so slider
-        // tweaks or auto-evolve mutations are reflected at the next
-        // audio-thread read (next sample, ~20 µs).
         recompute_patterns(engine);
+        advance_chord_attack(&app, engine);
+        reset_kick_sidechain_if_idle(&app, engine);
         terminal.draw(|f| ui(f, engine, &app))?;
 
         let timeout = tick.saturating_sub(last.elapsed());
@@ -188,6 +189,10 @@ fn advance_beat_sync(app: &mut AppState, engine: &EngineHandle) {
         let idx = engine.global.chord_index.value().round() as u32;
         let next = (idx + 1) % 4;
         engine.global.chord_index.set_value(next as f32);
+        // Retrigger the chord-attack envelope — voices (Pad / Shimmer
+        // / Bell etc.) will swell in over ~0.6 s instead of hard-cut.
+        engine.global.chord_attack_env.set_value(0.0);
+        app.last_chord_change = Some(Instant::now());
         app.last_bar_index = cur_bar;
     }
     let steps = (cur_beat - app.last_beat_index).min(4) as usize;
@@ -234,6 +239,33 @@ fn push_density_to_tracks(app: &AppState, engine: &EngineHandle) {
         // so small densities produce audible lift.
         let shaped = ratio.sqrt();
         track.params.life_mod.set_value(shaped);
+    }
+}
+
+/// Ramp the global chord-attack env from 0 → 1 over 0.6 s using
+/// smoothstep so the swell sounds musical, not linear.
+fn advance_chord_attack(app: &AppState, engine: &EngineHandle) {
+    let Some(started) = app.last_chord_change else {
+        return;
+    };
+    let elapsed = started.elapsed().as_secs_f32();
+    let t = (elapsed / 0.6).clamp(0.0, 1.0);
+    let eased = t * t * (3.0 - 2.0 * t);
+    engine.global.chord_attack_env.set_value(eased);
+}
+
+/// If no slot currently carries a Heartbeat voice (or they are all
+/// muted), the kick_sidechain Shared is nobody's responsibility to
+/// reset — leaving it at a stale value would duck the mix forever.
+/// Poll every TUI frame and clamp to 0 when no kick is active.
+fn reset_kick_sidechain_if_idle(_app: &AppState, engine: &EngineHandle) {
+    let tracks = engine.tracks.lock();
+    let any_kick_active = tracks.iter().any(|t| {
+        matches!(t.kind, PresetKind::Heartbeat) && t.params.mute.value() < 0.5
+    });
+    drop(tracks);
+    if !any_kick_active {
+        engine.global.kick_sidechain.set_value(0.0);
     }
 }
 

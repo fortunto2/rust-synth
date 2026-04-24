@@ -87,6 +87,15 @@ pub struct GlobalParams {
     ///   1 Dm-F-Am-G   (Memories of Green feel)
     ///   2 Am-C-G-F    (pop-rock cadence)
     pub chord_bank: Shared,
+    /// Live side-chain kick envelope, 0..1. Heartbeat writes it every
+    /// sample from its own amplitude envelope; other voices read it and
+    /// duck their gate by `(1 - 0.4 · kick_env)` so the kick feels big
+    /// without needing to be loud. Lock-free atomic by design.
+    pub kick_sidechain: Shared,
+    /// Envelope for the current chord — 0 at chord change, rising to 1
+    /// over ~0.6 s. Voices (especially Pad) multiply their output by
+    /// this so each new chord *swells in* rather than cutting hard.
+    pub chord_attack_env: Shared,
 }
 
 impl Default for GlobalParams {
@@ -98,6 +107,8 @@ impl Default for GlobalParams {
             scale_mode: shared(0.0),
             chord_index: shared(0.0),
             chord_bank: shared(0.0),
+            kick_sidechain: shared(0.0),
+            chord_attack_env: shared(1.0),
         }
     }
 }
@@ -382,6 +393,7 @@ fn supermass_send(amount: Shared) -> Net {
     dry & wet_scaled
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stereo_gate_voiced(
     gain: Shared,
     mute: Shared,
@@ -389,16 +401,28 @@ fn stereo_gate_voiced(
     bpm: Shared,
     life_mod: Shared,
     lb: LfoBundle,
+    kick_sc: Shared,
+    chord_attack_env: Shared,
+    duck_amount: f64,
+    chord_attack_enabled: bool,
 ) -> Net {
     let raw = lfo(move |t: f64| {
         let g_raw = (gain.value() * (1.0 - mute.value())) as f64;
-        // Tremolo — ±60 % at depth=1, additive around base.
         let g = lb.apply(g_raw, LFO_GAIN, t, |b, m| (b * (1.0 + m * 0.6)).max(0.0));
         let depth = pulse_depth.value().clamp(0.0, 1.0) as f64;
         let pulse = pulse_sine(t, bpm.value() as f64);
         let life = life_mod.value().clamp(0.0, 1.0) as f64;
         let life_scaled = 0.4 + 0.9 * life;
-        g * (1.0 - depth + depth * pulse) * life_scaled
+        // Side-chain ducking — kick drives other voices down.
+        let kick = kick_sc.value().clamp(0.0, 1.0) as f64;
+        let duck = 1.0 - duck_amount * kick;
+        // Chord swell — 0 at bar-start, rises to 1 over ~0.6 s.
+        let swell = if chord_attack_enabled {
+            chord_attack_env.value().clamp(0.0, 1.0) as f64
+        } else {
+            1.0
+        };
+        g * (1.0 - depth + depth * pulse) * life_scaled * duck * swell
     });
     Net::wrap(Box::new(raw >> follow(0.4) >> split::<U2>()))
 }
@@ -490,6 +514,10 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            0.4,
+            true,
         )
 }
 
@@ -541,6 +569,10 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            0.4,
+            true,
         )
 }
 
@@ -598,6 +630,10 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            0.4,
+            true,
         )
 }
 
@@ -643,20 +679,22 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
 
     // Sub — low sine, slower decay bleeds across the step boundary.
     // Amplitude comes from the sub_scale LFO defined below so we can
-    // lean into 808 boom at low character values.
+    // lean into 808 boom at low character values. ALSO writes to the
+    // global kick_sidechain so other voices can duck to it — that's
+    // the EDM sidechain-pump-without-a-compressor trick.
     let freq_sub = p.freq.clone();
     let sub_osc = lfo(move |_t: f64| freq_sub.value() as f64 * 0.5) >> sine();
     let bpm_sub_e = bpm.clone();
     let pat_sub = p.pattern_bits.clone();
+    let kick_sc_write = g.kick_sidechain.clone();
     let sub_env = lfo(move |t: f64| {
         let bpm_v = bpm_sub_e.value() as f64;
         let bits = pat_sub.load(Ordering::Relaxed);
         let (active, phi) = rhythm::step_is_active(bits, t, bpm_v);
-        if active {
-            (-phi * 1.5).exp()
-        } else {
-            0.0
-        }
+        let env = if active { (-phi * 1.5).exp() } else { 0.0 };
+        // Publish envelope to other voices (Pad/Bass/Drone).
+        kick_sc_write.set_value(env as f32);
+        env
     });
     let sub = sub_osc * sub_env;
 
@@ -713,6 +751,12 @@ fn heartbeat(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            // Heartbeat is the ducker, not the ducked. No chord swell
+            // either — percussive transients should stay crisp.
+            0.0,
+            false,
         )
 }
 
@@ -770,6 +814,10 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            0.4,
+            true,
         )
 }
 
@@ -827,6 +875,10 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            0.4,
+            true,
         )
 }
 
@@ -901,6 +953,10 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            0.4,
+            true,
         )
 }
 
@@ -983,5 +1039,11 @@ fn pluck_saw(p: &TrackParams, g: &GlobalParams) -> Net {
             g.bpm.clone(),
             p.life_mod.clone(),
             lb,
+            g.kick_sidechain.clone(),
+            g.chord_attack_env.clone(),
+            // Pluck is percussive — skip the chord swell so each hit
+            // punches. Keep a light duck so it sits under the kick.
+            0.2,
+            false,
         )
 }

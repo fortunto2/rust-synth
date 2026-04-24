@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod preset;
+pub mod scope;
 pub mod track;
 pub mod vibe;
 

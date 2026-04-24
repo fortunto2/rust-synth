@@ -21,10 +21,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
 use fundsp::hacker::*;
 use parking_lot::Mutex;
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use super::preset::{master_bus as build_master_bus, GlobalParams, Preset, PresetKind};
+use super::scope::Scope;
 use super::track::Track;
 use crate::math::harmony::golden_freq;
 use crate::recording::RecorderState;
@@ -41,7 +41,7 @@ pub const SCOPE_DECIMATION: usize = 32;
 pub const PER_TRACK_SCOPE_CAPACITY: usize = 256;
 pub const PER_TRACK_SCOPE_DECIMATION: usize = 16;
 
-pub type ScopeBuffer = Arc<Mutex<VecDeque<(f32, f32)>>>;
+pub type ScopeBuffer = Arc<Scope>;
 pub type SharedNet = Arc<Mutex<Net>>;
 
 pub struct EngineHandle {
@@ -83,9 +83,9 @@ impl AudioEngine {
         let peak_r = shared(0.0);
         let phase_clock = shared(0.0);
 
-        let scope: ScopeBuffer = Arc::new(Mutex::new(VecDeque::with_capacity(SCOPE_CAPACITY)));
+        let scope: ScopeBuffer = Arc::new(Scope::new(SCOPE_CAPACITY));
         let per_track_scopes: Vec<ScopeBuffer> = (0..MAX_TRACKS)
-            .map(|_| Arc::new(Mutex::new(VecDeque::with_capacity(PER_TRACK_SCOPE_CAPACITY))))
+            .map(|_| Arc::new(Scope::new(PER_TRACK_SCOPE_CAPACITY)))
             .collect();
 
         let tracks = Arc::new(Mutex::new(initial_tracks));
@@ -191,15 +191,11 @@ fn start_stream(
         move |data: &mut [f32], _| {
             let m = master.value();
 
-            // Pre-allocate per-buffer sample buckets for scopes; we
-            // batch-push at the end so the mutex lock is held briefly.
-            let mut master_pending: [(f32, f32); 32] = [(0.0, 0.0); 32];
-            let mut master_pending_n = 0usize;
-            let mut track_pending: Vec<Vec<(f32, f32)>> =
-                (0..n_tracks).map(|_| Vec::with_capacity(32)).collect();
-
-            // Lock every graph for the whole buffer — under 500 ns
-            // contention cost per flip, UI only rebuilds on kind change.
+            // Lock every graph for the whole buffer. Rebuilds happen on
+            // the TUI thread behind these same locks; contention window
+            // is just a pointer swap (microseconds).
+            // TODO[#1]: migrate per_track_nets to arc-swap so the
+            // callback does zero locking.
             let mut net_guards: Vec<_> = per_track_nets.iter().map(|n| n.lock()).collect();
             let mut mb_guard = master_bus_net.lock();
 
@@ -213,11 +209,10 @@ fn start_stream(
                     sum_l += voice_l;
                     sum_r += voice_r;
                     // Per-track scope decimation — one sample every N
-                    // audio samples. Batched into track_pending so lock
-                    // is taken once per callback per track.
+                    // audio samples, pushed lock-free into the ring.
                     per_track_decim[i] = per_track_decim[i].wrapping_add(1);
                     if per_track_decim[i].is_multiple_of(PER_TRACK_SCOPE_DECIMATION) {
-                        track_pending[i].push((voice_l, voice_r));
+                        per_track_scopes[i].push(voice_l, voice_r);
                     }
                 }
 
@@ -240,11 +235,8 @@ fn start_stream(
                 recorder.push_frame(l, r);
 
                 decim = decim.wrapping_add(1);
-                if decim.is_multiple_of(SCOPE_DECIMATION)
-                    && master_pending_n < master_pending.len()
-                {
-                    master_pending[master_pending_n] = (l, r);
-                    master_pending_n += 1;
+                if decim.is_multiple_of(SCOPE_DECIMATION) {
+                    scope.push(l, r);
                 }
 
                 t += dt;
@@ -252,31 +244,6 @@ fn start_stream(
 
             drop(net_guards);
             drop(mb_guard);
-
-            // Flush master scope.
-            if master_pending_n > 0 {
-                let mut scope = scope.lock();
-                for &s in &master_pending[..master_pending_n] {
-                    if scope.len() == SCOPE_CAPACITY {
-                        scope.pop_front();
-                    }
-                    scope.push_back(s);
-                }
-            }
-
-            // Flush per-track scopes.
-            for (i, batch) in track_pending.iter().enumerate() {
-                if batch.is_empty() {
-                    continue;
-                }
-                let mut buf = per_track_scopes[i].lock();
-                for &s in batch {
-                    if buf.len() == PER_TRACK_SCOPE_CAPACITY {
-                        buf.pop_front();
-                    }
-                    buf.push_back(s);
-                }
-            }
 
             peak_l.set_value(env_l);
             peak_r.set_value(env_r);

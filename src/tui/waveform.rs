@@ -11,7 +11,8 @@ use super::theme::Theme;
 use crate::audio::engine::{EngineHandle, SCOPE_CAPACITY};
 
 pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle) {
-    let samples: Vec<(f32, f32)> = engine.scope.lock().iter().copied().collect();
+    let mut samples: Vec<(f32, f32)> = Vec::with_capacity(SCOPE_CAPACITY);
+    engine.scope.snapshot(&mut samples);
     let len = samples.len().max(1);
     let theme = Theme::NIGHT_CITY;
     let left_color = theme.accent(); // cyan

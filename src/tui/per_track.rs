@@ -61,14 +61,13 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
 
         f.render_widget(Paragraph::new(label).style(label_style), slice[0]);
 
-        // Pull the latest decimated samples for this track. Clone into
-        // a Vec so the canvas closure owns its data without holding
-        // the mutex across the paint call.
-        let samples: Vec<(f32, f32)> = engine
-            .per_track_scopes
-            .get(i)
-            .map(|s| s.lock().iter().copied().collect())
-            .unwrap_or_default();
+        // Pull the latest decimated samples for this track. The ring
+        // is lock-free; this just atomic-loads PER_TRACK_SCOPE_CAPACITY
+        // samples into a fresh Vec that the canvas closure owns.
+        let mut samples: Vec<(f32, f32)> = Vec::with_capacity(PER_TRACK_SCOPE_CAPACITY);
+        if let Some(s) = engine.per_track_scopes.get(i) {
+            s.snapshot(&mut samples);
+        }
 
         let canvas = Canvas::default()
             .marker(Marker::Braille)

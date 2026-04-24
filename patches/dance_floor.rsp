@@ -1,0 +1,21 @@
+# DanceFloor — tight low-end, busy PluckSaw, 4-on-the-floor, little reverb.
+
+bpm = 128
+brightness = 0.75
+master = 0.70
+scale = major
+chord = am-c-g-f
+
+track 0 = Bass      freq=55  cutoff=500  resonance=0.55 \
+                    reverb=0.25 supermass=0.00 arp=0.30 gain=0.62
+track 1 = Heartbeat          character=0.75 hits=4 rot=0 \
+                    reverb=0.40 supermass=0.00 gain=0.75
+track 2 = Pluck     freq=110 cutoff=3000 resonance=0.45 hits=11 \
+                    reverb=0.35 arp=0.40 gain=0.45
+track 3 = SuperSaw  freq=82  cutoff=2400 detune=30 \
+                    reverb=0.50 supermass=0.25 arp=0.20 \
+                    lfo_rate=0.25 lfo_depth=0.35 lfo_target=cut gain=0.38
+track 4 = mute
+track 5 = mute
+track 6 = mute
+track 7 = mute

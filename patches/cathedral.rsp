@@ -1,0 +1,18 @@
+# Cathedral — 4 voices soaked in supermass, nearly infinite tail.
+
+bpm = 54
+brightness = 0.55
+master = 0.60
+scale = major
+chord = dm-f-am-g
+
+track 0 = Pad     freq=55   cutoff=2000 character=0.80 \
+                  reverb=0.95 supermass=1.00 arp=0.10 gain=0.45
+track 1 = Shimmer freq=110  reverb=0.95 supermass=1.00 arp=0.15 gain=0.30
+track 2 = Bell    freq=55   resonance=0.40 character=0.50 \
+                  reverb=0.95 supermass=1.00 arp=0.25 gain=0.28
+track 3 = Drone   freq=27.5 cutoff=160  reverb=0.95 supermass=0.90 gain=0.30
+track 4 = mute
+track 5 = mute
+track 6 = mute
+track 7 = mute

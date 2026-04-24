@@ -11,6 +11,9 @@ Cargo.lock.bak
 *.flac
 !docs/**/*.wav
 
+# User-created patches (keep the ones we ship)
+/patches/20*.rsp
+
 # Profiling
 trace.json
 *.profraw

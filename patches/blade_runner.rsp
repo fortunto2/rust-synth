@@ -1,0 +1,25 @@
+# Blade Runner (Vangelis, 1982) — slow minor-pentatonic atmosphere.
+# 8 voices, cathedral supermass on most, inharmonic Bell stab.
+# Reload live with `i` after editing.
+
+bpm = 66
+brightness = 0.45
+master = 0.65
+scale = minor
+chord = am-f-c-g
+
+track 0 = Pad      freq=55   cutoff=2400 resonance=0.30 detune=22 character=0.70 \
+                   reverb=0.80 supermass=0.70 arp=0.18 \
+                   lfo_rate=0.12 lfo_depth=0.45 lfo_target=cut gain=0.48
+track 1 = Bass     freq=55   cutoff=380  resonance=0.45 character=0.40 \
+                   reverb=0.55 supermass=0.30 arp=0.25 gain=0.55
+track 2 = Heartbeat            character=0.18 hits=3 rot=0 \
+                   reverb=0.45 supermass=0.15 gain=0.65
+track 3 = Drone    freq=27.5 cutoff=180  reverb=0.85 supermass=0.60 gain=0.32
+track 4 = Shimmer  freq=110  reverb=0.90 supermass=0.80 arp=0.22 character=0.70 gain=0.28
+track 5 = Bell     freq=82   resonance=0.50 character=0.65 \
+                   reverb=0.85 supermass=0.70 arp=0.30 gain=0.30
+track 6 = SuperSaw freq=55   cutoff=1800 resonance=0.35 detune=18 \
+                   reverb=0.70 supermass=0.50 arp=0.20 \
+                   lfo_rate=0.08 lfo_depth=0.30 lfo_target=cut gain=0.32
+track 7 = mute

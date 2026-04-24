@@ -70,6 +70,8 @@ pub struct AppState {
     pub status: Option<(Instant, String)>,
     pub presets_dir: PathBuf,
     pub recordings_dir: PathBuf,
+    pub patches_dir: PathBuf,
+    pub patch_path: Option<PathBuf>,
     pub current_vibe: VibeKind,
 }
 
@@ -94,6 +96,8 @@ impl AppState {
             status: None,
             presets_dir: PathBuf::from("presets"),
             recordings_dir: PathBuf::from("recordings"),
+            patches_dir: PathBuf::from("patches"),
+            patch_path: None,
             current_vibe: VibeKind::Default,
         }
     }
@@ -116,14 +120,14 @@ impl Default for AppState {
     }
 }
 
-pub fn run(engine: &EngineHandle) -> Result<()> {
+pub fn run(engine: &EngineHandle, patch_path: Option<PathBuf>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_loop(&mut terminal, engine);
+    let res = run_loop(&mut terminal, engine, patch_path);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
@@ -135,8 +139,10 @@ pub fn run(engine: &EngineHandle) -> Result<()> {
 fn run_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     engine: &EngineHandle,
+    patch_path: Option<PathBuf>,
 ) -> Result<()> {
     let mut app = AppState::new();
+    app.patch_path = patch_path;
     let tick = Duration::from_millis(33);
     let mut last = Instant::now();
 
@@ -437,8 +443,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk · Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save/load · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
+        Focus::Tracks => " ↑↓trk · Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save · i/I patch · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save · i/I patch · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
     })
     .block(
         Block::default()
@@ -618,6 +624,33 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
                 fmt.label(),
                 fmt.extension()
             ));
+            return;
+        }
+        KeyCode::Char('i') => {
+            // Reimport the patch file used at startup (or any path the
+            // user set via --patch). Text file, editor-friendly.
+            if let Some(path) = app.patch_path.clone() {
+                match crate::patch::load_from_file(engine, &path) {
+                    Ok(n) => app.set_status(format!("reloaded patch {} ({n} slots)", short_path(&path))),
+                    Err(e) => app.set_status(format!("patch reload failed: {e}")),
+                }
+            } else {
+                app.set_status("no patch file loaded (start with --patch FILE)".to_string());
+            }
+            return;
+        }
+        KeyCode::Char('I') => {
+            // Export current state as a patch snapshot next to presets.
+            std::fs::create_dir_all(&app.patches_dir).ok();
+            let name = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S.rsp").to_string();
+            let path = app.patches_dir.join(name);
+            match crate::patch::save_to_file(engine, &path) {
+                Ok(()) => {
+                    app.patch_path = Some(path.clone());
+                    app.set_status(format!("wrote patch → {}", short_path(&path)));
+                }
+                Err(e) => app.set_status(format!("patch save failed: {e}")),
+            }
             return;
         }
         _ => {}

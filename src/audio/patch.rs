@@ -35,8 +35,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::audio::engine::EngineHandle;
-use crate::audio::preset::PresetKind;
+use super::engine::EngineHandle;
+use super::preset::PresetKind;
 
 #[derive(Debug, Default, Clone)]
 pub struct Patch {

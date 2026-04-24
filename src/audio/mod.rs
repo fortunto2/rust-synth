@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod patch;
 pub mod preset;
 pub mod scope;
 pub mod track;

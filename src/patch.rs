@@ -110,6 +110,10 @@ fn parse_line(line: &str, patch: &mut Patch) -> Result<()> {
     Ok(())
 }
 
+/// Upper bound on accepted slot indices — keeps a hostile `.rsp` from
+/// allocating unboundedly (one `TrackPatch` + HashMap per line).
+pub const MAX_SLOT: usize = 64;
+
 fn parse_track_line(line: &str, patch: &mut Patch) -> Result<()> {
     // `N = Kind k=v ...`
     let (slot_part, body) = split_assign(line)?;
@@ -117,6 +121,9 @@ fn parse_track_line(line: &str, patch: &mut Patch) -> Result<()> {
         .trim()
         .parse()
         .with_context(|| format!("expected slot number, got `{slot_part}`"))?;
+    if slot > MAX_SLOT {
+        bail!("slot {slot} out of range (0..={MAX_SLOT})");
+    }
     let mut tokens = body.split_whitespace();
     let kind_raw = tokens
         .next()
@@ -158,8 +165,13 @@ fn split_assign(s: &str) -> Result<(&str, &str)> {
 }
 
 fn parse_f32(s: &str) -> Result<f32> {
-    s.parse::<f32>()
-        .with_context(|| format!("not a number: `{s}`"))
+    let v: f32 = s
+        .parse()
+        .with_context(|| format!("not a number: `{s}`"))?;
+    if !v.is_finite() {
+        bail!("non-finite number not allowed: `{s}`");
+    }
+    Ok(v)
 }
 
 fn parse_kind(s: &str) -> Result<PresetKind> {

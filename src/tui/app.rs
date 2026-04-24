@@ -74,6 +74,9 @@ pub struct AppState {
     pub patches_dir: PathBuf,
     pub patch_path: Option<PathBuf>,
     pub current_vibe: VibeKind,
+    /// When `Some`, the full-screen patch editor owns the TUI — normal
+    /// widgets are hidden and all key events route to the editor.
+    pub editor: Option<super::editor::EditorState>,
 }
 
 impl AppState {
@@ -101,6 +104,7 @@ impl AppState {
             patches_dir: PathBuf::from("patches"),
             patch_path: None,
             current_vibe: VibeKind::Default,
+            editor: None,
         }
     }
 
@@ -158,7 +162,18 @@ fn run_loop<B: ratatui::backend::Backend>(
         let timeout = tick.saturating_sub(last.elapsed());
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                handle_key(key, engine, &mut app);
+                if app.editor.is_some() {
+                    let keep_open = app
+                        .editor
+                        .as_mut()
+                        .unwrap()
+                        .handle_key(key, engine);
+                    if !keep_open {
+                        app.editor = None;
+                    }
+                } else {
+                    handle_key(key, engine, &mut app);
+                }
             }
         }
         if last.elapsed() >= tick {
@@ -379,6 +394,14 @@ fn genome_of(p: &TrackParams) -> Genome<'_> {
 fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     let area = f.area();
 
+    // Editor takes over the full screen when active — everything else
+    // stays running in the background (audio keeps playing) but the UI
+    // just shows the text buffer.
+    if let Some(ed) = app.editor.as_ref() {
+        super::editor::render(f, area, ed);
+        return;
+    }
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -475,8 +498,8 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
     super::formula::render(f, body[2], engine, app);
 
     let help = Paragraph::new(match app.focus {
-        Focus::Tracks => " ↑↓trk · Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save · i/I patch · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
-        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save · i/I patch · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
+        Focus::Tracks => " ↑↓trk · Enter→p · V vibe · a add · d kill · m mute · t/T kind · r rand · e/E mut · x cross · h/H hits · p/P rot · S/s super · w/l save · v edit · i/I patch · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
+        Focus::Params => " ↑↓param · ←→adj · Esc←tracks · V vibe · t/T kind · e/E mut · h/H hits · p/P rot · S/s super · w/l save · v edit · i/I patch · c REC · f fmt · ,/. bpm · {/} brt · q quit ",
     })
     .block(
         Block::default()
@@ -683,6 +706,12 @@ fn handle_key(key: KeyEvent, engine: &EngineHandle, app: &mut AppState) {
                 }
                 Err(e) => app.set_status(format!("patch save failed: {e}")),
             }
+            return;
+        }
+        KeyCode::Char('v') => {
+            // Open the inline patch editor pre-populated with the
+            // current engine state. Ctrl-S inside applies, Esc closes.
+            app.editor = Some(super::editor::EditorState::from_engine(engine));
             return;
         }
         _ => {}

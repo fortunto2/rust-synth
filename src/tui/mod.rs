@@ -1,5 +1,6 @@
 pub mod app;
 pub mod beats;
+pub mod editor;
 pub mod formula;
 pub mod life;
 pub mod params;

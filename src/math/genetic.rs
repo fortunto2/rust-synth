@@ -33,11 +33,15 @@ pub struct Genome<'a> {
 pub fn mutate(g: &Genome, seed: &mut u64, strength: f32) {
     let s = strength.clamp(0.0, 1.0);
 
-    // Freq — pick a neighbour on the golden pentatonic scale.
-    let cur = g.freq.value();
+    // Freq — pick a neighbour on the golden pentatonic scale. Clamp
+    // to the musical range so repeated mutations can't walk a track
+    // into ultrasonic territory (golden_pentatonic around 7 kHz returns
+    // 5-15 kHz neighbours; without a cap the walk compounds into
+    // Nyquist over a few cycles).
+    let cur = g.freq.value().clamp(20.0, 880.0);
     let scale = golden_pentatonic(cur);
     let idx = rand_u32(seed, scale.len() as u32) as usize;
-    g.freq.set_value(scale[idx]);
+    g.freq.set_value(scale[idx].clamp(20.0, 880.0));
 
     // Cutoff — multiplicative nudge, log-scaled (exp perturbation).
     let cut_factor = (1.0 + s * 0.8 * rand_f32(seed)).clamp(0.25, 4.0);
@@ -73,7 +77,9 @@ pub fn mutate(g: &Genome, seed: &mut u64, strength: f32) {
 /// Result is written into `a`. Freq is snapped to pentatonic afterwards.
 pub fn crossover(a: &Genome, b: &Genome, seed: &mut u64) {
     if rand_u32(seed, 2) == 0 {
-        a.freq.set_value(b.freq.value());
+        // Clamp — parent B might itself be out of range from earlier
+        // mutations; don't propagate that into child A.
+        a.freq.set_value(b.freq.value().clamp(20.0, 880.0));
     }
     if rand_u32(seed, 2) == 0 {
         a.cutoff.set_value(b.cutoff.value());
@@ -96,9 +102,9 @@ pub fn crossover(a: &Genome, b: &Genome, seed: &mut u64) {
     if rand_u32(seed, 2) == 0 {
         a.character.set_value(b.character.value());
     }
-    // Snap freq after crossover.
-    let cur = a.freq.value();
+    // Snap freq after crossover — same range clamp as mutate.
+    let cur = a.freq.value().clamp(20.0, 880.0);
     let scale = golden_pentatonic(cur);
     let idx = rand_u32(seed, scale.len() as u32) as usize;
-    a.freq.set_value(scale[idx]);
+    a.freq.set_value(scale[idx].clamp(20.0, 880.0));
 }

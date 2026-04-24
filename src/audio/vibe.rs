@@ -58,10 +58,10 @@ fn apply_blade_runner(engine: &EngineHandle) {
     engine.global.chord_bank.set_value(0.0); // Am-F-C-G
     engine.global.chord_index.set_value(0.0);
 
-    let tracks = engine.tracks.lock();
+    let mut tracks = engine.tracks.lock();
     let root = 55.0_f32; // A1
 
-    set_track(&tracks, 0, PresetKind::PadZimmer, root, |p| {
+    set_track(&mut tracks, 0, PresetKind::PadZimmer, root, |p| {
         p.gain.set_value(0.48);
         p.cutoff.set_value(2400.0);
         p.resonance.set_value(0.30);
@@ -74,7 +74,7 @@ fn apply_blade_runner(engine: &EngineHandle) {
         p.lfo_depth.set_value(0.45);
         p.lfo_target.set_value(1.0); // CUT
     });
-    set_track(&tracks, 1, PresetKind::BassPulse, root, |p| {
+    set_track(&mut tracks, 1, PresetKind::BassPulse, root, |p| {
         p.gain.set_value(0.55);
         p.cutoff.set_value(380.0);
         p.resonance.set_value(0.45);
@@ -83,7 +83,7 @@ fn apply_blade_runner(engine: &EngineHandle) {
         p.supermass.set_value(0.30);
         p.arp.set_value(0.25);
     });
-    set_track(&tracks, 2, PresetKind::Heartbeat, root, |p| {
+    set_track(&mut tracks, 2, PresetKind::Heartbeat, root, |p| {
         p.gain.set_value(0.65);
         // Low character → almost no click, all 808-style sub boom.
         // No more "knock on wood in the distance."
@@ -93,20 +93,20 @@ fn apply_blade_runner(engine: &EngineHandle) {
         p.reverb_mix.set_value(0.45); // up-front, not cavernous
         p.supermass.set_value(0.15);
     });
-    set_track(&tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
+    set_track(&mut tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
         p.gain.set_value(0.32);
         p.cutoff.set_value(180.0);
         p.reverb_mix.set_value(0.85);
         p.supermass.set_value(0.60);
     });
-    set_track(&tracks, 4, PresetKind::Shimmer, root * 2.0, |p| {
+    set_track(&mut tracks, 4, PresetKind::Shimmer, root * 2.0, |p| {
         p.gain.set_value(0.28);
         p.character.set_value(0.70);
         p.reverb_mix.set_value(0.90);
         p.supermass.set_value(0.80);
         p.arp.set_value(0.22);
     });
-    set_track(&tracks, 5, PresetKind::Bell, root * 1.5, |p| {
+    set_track(&mut tracks, 5, PresetKind::Bell, root * 1.5, |p| {
         p.gain.set_value(0.30);
         p.resonance.set_value(0.50); // FM depth — CS-80 metallic stab
         p.character.set_value(0.65); // FM ratio ≈ 3.1
@@ -114,7 +114,7 @@ fn apply_blade_runner(engine: &EngineHandle) {
         p.supermass.set_value(0.70);
         p.arp.set_value(0.30);
     });
-    set_track(&tracks, 6, PresetKind::SuperSaw, root, |p| {
+    set_track(&mut tracks, 6, PresetKind::SuperSaw, root, |p| {
         p.gain.set_value(0.32);
         p.cutoff.set_value(1800.0);
         p.resonance.set_value(0.35);
@@ -138,10 +138,10 @@ fn apply_cathedral(engine: &EngineHandle) {
     engine.global.chord_bank.set_value(1.0); // Dm-F-Am-G
     engine.global.chord_index.set_value(0.0);
 
-    let tracks = engine.tracks.lock();
+    let mut tracks = engine.tracks.lock();
     let root = 55.0_f32;
 
-    set_track(&tracks, 0, PresetKind::PadZimmer, root, |p| {
+    set_track(&mut tracks, 0, PresetKind::PadZimmer, root, |p| {
         p.gain.set_value(0.45);
         p.cutoff.set_value(2000.0);
         p.character.set_value(0.80);
@@ -149,13 +149,13 @@ fn apply_cathedral(engine: &EngineHandle) {
         p.supermass.set_value(1.00);
         p.arp.set_value(0.10);
     });
-    set_track(&tracks, 1, PresetKind::Shimmer, root * 2.0, |p| {
+    set_track(&mut tracks, 1, PresetKind::Shimmer, root * 2.0, |p| {
         p.gain.set_value(0.30);
         p.reverb_mix.set_value(0.95);
         p.supermass.set_value(1.00);
         p.arp.set_value(0.15);
     });
-    set_track(&tracks, 2, PresetKind::Bell, root, |p| {
+    set_track(&mut tracks, 2, PresetKind::Bell, root, |p| {
         p.gain.set_value(0.28);
         p.resonance.set_value(0.40);
         p.character.set_value(0.50);
@@ -163,7 +163,7 @@ fn apply_cathedral(engine: &EngineHandle) {
         p.supermass.set_value(1.00);
         p.arp.set_value(0.25);
     });
-    set_track(&tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
+    set_track(&mut tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
         p.gain.set_value(0.30);
         p.cutoff.set_value(160.0);
         p.reverb_mix.set_value(0.95);
@@ -184,10 +184,10 @@ fn apply_dance_floor(engine: &EngineHandle) {
     engine.global.chord_bank.set_value(2.0); // Am-C-G-F
     engine.global.chord_index.set_value(0.0);
 
-    let tracks = engine.tracks.lock();
+    let mut tracks = engine.tracks.lock();
     let root = 55.0_f32;
 
-    set_track(&tracks, 0, PresetKind::BassPulse, root, |p| {
+    set_track(&mut tracks, 0, PresetKind::BassPulse, root, |p| {
         p.gain.set_value(0.62);
         p.cutoff.set_value(500.0);
         p.resonance.set_value(0.55);
@@ -195,7 +195,7 @@ fn apply_dance_floor(engine: &EngineHandle) {
         p.supermass.set_value(0.0);
         p.arp.set_value(0.30);
     });
-    set_track(&tracks, 1, PresetKind::Heartbeat, root, |p| {
+    set_track(&mut tracks, 1, PresetKind::Heartbeat, root, |p| {
         p.gain.set_value(0.75);
         p.character.set_value(0.75); // punchy kick
         p.pattern_hits.set_value(4.0);
@@ -203,7 +203,7 @@ fn apply_dance_floor(engine: &EngineHandle) {
         p.reverb_mix.set_value(0.40);
         p.supermass.set_value(0.0);
     });
-    set_track(&tracks, 2, PresetKind::PluckSaw, root * 2.0, |p| {
+    set_track(&mut tracks, 2, PresetKind::PluckSaw, root * 2.0, |p| {
         p.gain.set_value(0.45);
         p.cutoff.set_value(3000.0);
         p.resonance.set_value(0.45);
@@ -211,7 +211,7 @@ fn apply_dance_floor(engine: &EngineHandle) {
         p.reverb_mix.set_value(0.35);
         p.arp.set_value(0.40);
     });
-    set_track(&tracks, 3, PresetKind::SuperSaw, root * 1.5, |p| {
+    set_track(&mut tracks, 3, PresetKind::SuperSaw, root * 1.5, |p| {
         p.gain.set_value(0.38);
         p.cutoff.set_value(2400.0);
         p.detune.set_value(30.0);
@@ -237,20 +237,20 @@ fn apply_default(engine: &EngineHandle) {
     engine.global.chord_bank.set_value(0.0);
     engine.global.chord_index.set_value(0.0);
 
-    let tracks = engine.tracks.lock();
+    let mut tracks = engine.tracks.lock();
     let root = 55.0_f32;
 
-    set_track(&tracks, 0, PresetKind::PadZimmer, root, |p| {
+    set_track(&mut tracks, 0, PresetKind::PadZimmer, root, |p| {
         reset_neutral(p);
     });
-    set_track(&tracks, 1, PresetKind::BassPulse, root, |p| {
+    set_track(&mut tracks, 1, PresetKind::BassPulse, root, |p| {
         reset_neutral(p);
     });
-    set_track(&tracks, 2, PresetKind::Heartbeat, root, |p| {
+    set_track(&mut tracks, 2, PresetKind::Heartbeat, root, |p| {
         reset_neutral(p);
         p.pulse_depth.set_value(0.0);
     });
-    set_track(&tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
+    set_track(&mut tracks, 3, PresetKind::DroneSub, root * 0.5, |p| {
         reset_neutral(p);
         p.gain.set_value(0.32);
         p.reverb_mix.set_value(0.7);
@@ -264,7 +264,7 @@ fn apply_default(engine: &EngineHandle) {
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 fn set_track<F>(
-    tracks: &parking_lot::MutexGuard<'_, Vec<super::track::Track>>,
+    tracks: &mut parking_lot::MutexGuard<'_, Vec<super::track::Track>>,
     idx: usize,
     kind: PresetKind,
     freq: f32,
@@ -272,15 +272,8 @@ fn set_track<F>(
 ) where
     F: FnOnce(&super::track::TrackParams),
 {
-    // SAFETY: we own the MutexGuard for the caller's lifetime; the audio
-    // thread reads `kind` only at rebuild_graph() which is called after
-    // this function returns via engine.rebuild_graph(). Direct pointer
-    // mutation avoids the mutability dance through a `&mut Vec<Track>`.
-    let track = &tracks[idx];
-    let track_ptr = track as *const super::track::Track as *mut super::track::Track;
-    unsafe {
-        (*track_ptr).kind = kind;
-    }
+    let track = &mut tracks[idx];
+    track.kind = kind;
     track.params.freq.set_value(freq);
     track.params.mute.set_value(0.0);
     config(&track.params);

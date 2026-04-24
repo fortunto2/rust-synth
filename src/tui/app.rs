@@ -347,7 +347,7 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
             Constraint::Length(3),      // header
             Constraint::Length(10),     // life (8 tracks + 2 border)
             Constraint::Length(3),      // pattern (1 row + 2 border)
-            Constraint::Length(10),     // scope + waveshape
+            Constraint::Length(18),     // scope + 8-voice waveform strip
             Constraint::Min(14),        // tracks + params + formula
             Constraint::Length(3),      // help
         ])
@@ -414,12 +414,15 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
 
     super::pattern::render(f, rows[2], engine, app);
 
+    // Middle row split: master scope left, Glicol-style per-voice
+    // waveform strip right.  Replaces the single selected-voice
+    // waveshape — you see every track at once now.
     let mid = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(rows[3]);
     super::waveform::render(f, mid[0], engine);
-    super::waveshape::render(f, mid[1], engine, app);
+    super::per_track::render(f, mid[1], engine, app);
 
     let body = Layout::default()
         .direction(Direction::Horizontal)

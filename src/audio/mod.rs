@@ -4,6 +4,7 @@ pub mod preset;
 pub mod scope;
 pub mod track;
 pub mod vibe;
+mod voices;
 
 pub use engine::{AudioEngine, EngineHandle};
 pub use preset::{Preset, PresetKind};

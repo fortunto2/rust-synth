@@ -89,12 +89,12 @@ pub struct GlobalParams {
     pub chord_bank: Shared,
     /// Live side-chain kick envelope, 0..1. Heartbeat writes it every
     /// sample from its own amplitude envelope; other voices read it and
-    /// duck their gate by `(1 - 0.4 · kick_env)` so the kick feels big
-    /// without needing to be loud. Lock-free atomic by design.
+    /// duck their gate by `(1 - SIDECHAIN_DUCK · kick_env)` so the kick
+    /// feels big without needing to be loud. Lock-free atomic by design.
     pub kick_sidechain: Shared,
     /// Envelope for the current chord — 0 at chord change, rising to 1
-    /// over ~0.6 s. Voices (especially Pad) multiply their output by
-    /// this so each new chord *swells in* rather than cutting hard.
+    /// over ~0.25 s. Voices multiply a 0.65-floored copy of it into their
+    /// gate so each new chord *breathes in* rather than cutting hard.
     pub chord_attack_env: Shared,
 }
 
@@ -133,6 +133,11 @@ pub fn chord_offset(bank: u32, idx: u32) -> f64 {
 
 pub const MASTER_SHELF_HZ: f64 = 3500.0;
 pub const MIN_SHELF_GAIN: f64 = 0.2;
+
+/// Side-chain duck depth for sustained voices. Kick envelope scales
+/// `1 - DUCK * kick`. 0.22 leaves plenty of pad through; above ~0.35
+/// the mix starts to feel gated-all-the-time.
+pub const SIDECHAIN_DUCK: f64 = 0.22;
 
 /// Map brightness [0..1] → shelf amplitude gain [MIN..1.0] linearly.
 #[inline]
@@ -515,7 +520,7 @@ fn pad_zimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.22,
+            SIDECHAIN_DUCK,
             true,
         )
 }
@@ -570,7 +575,7 @@ fn drone_sub(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.22,
+            SIDECHAIN_DUCK,
             true,
         )
 }
@@ -631,7 +636,7 @@ fn shimmer(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.22,
+            SIDECHAIN_DUCK,
             true,
         )
 }
@@ -815,7 +820,7 @@ fn bass_pulse(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.22,
+            SIDECHAIN_DUCK,
             true,
         )
 }
@@ -876,7 +881,7 @@ fn bell_preset(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.22,
+            SIDECHAIN_DUCK,
             true,
         )
 }
@@ -954,7 +959,7 @@ fn super_saw(p: &TrackParams, g: &GlobalParams) -> Net {
             lb,
             g.kick_sidechain.clone(),
             g.chord_attack_env.clone(),
-            0.22,
+            SIDECHAIN_DUCK,
             true,
         )
 }

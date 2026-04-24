@@ -39,7 +39,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     let (color, subtitle) = describe(kind, &s);
     let title = format!(" waveshape · {} · {} ", name, subtitle);
 
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let canvas = Canvas::default()
         .block(
             Block::default()

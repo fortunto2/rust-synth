@@ -187,7 +187,7 @@ impl EditorState {
 }
 
 pub fn render(f: &mut Frame, area: Rect, state: &EditorState) {
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
 
     // Split: title/header, body, footer.
     let rows = Layout::default()

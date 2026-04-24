@@ -17,7 +17,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     };
     let s = track.params.snapshot();
 
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let focus_style = if app.focus == Focus::Params {
         Style::default().fg(theme.accent())
     } else {

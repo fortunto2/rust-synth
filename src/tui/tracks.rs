@@ -10,7 +10,7 @@ use super::theme::Theme;
 use crate::audio::engine::EngineHandle;
 
 pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) {
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let tracks = engine.tracks.lock();
     let items: Vec<ListItem> = tracks
         .iter()

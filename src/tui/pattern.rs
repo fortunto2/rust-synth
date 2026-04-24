@@ -48,7 +48,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         format!(" pattern · {} · (non-drum, ignored) ", name)
     };
 
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let mut cells: Vec<Span> = Vec::with_capacity(STEPS as usize * 2);
     for step in 0..STEPS {
         let active = (bits >> step) & 1 == 1;

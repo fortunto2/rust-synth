@@ -87,7 +87,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
         life.generation,
         life.density() * 100.0,
     );
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.fg_dim()))

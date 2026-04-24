@@ -14,7 +14,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle) {
     let mut samples: Vec<(f32, f32)> = Vec::with_capacity(SCOPE_CAPACITY);
     engine.scope.snapshot(&mut samples);
     let len = samples.len().max(1);
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let left_color = theme.accent(); // cyan
     let right_color = theme.fg();    // amber
 

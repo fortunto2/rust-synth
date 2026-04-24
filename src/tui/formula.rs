@@ -25,7 +25,7 @@ pub fn render(f: &mut Frame, area: Rect, engine: &EngineHandle, app: &AppState) 
     let title = format!(" formula · {} · {} ", track.name, track.kind.label());
     let lines: Vec<Line> = lines_for(track.kind, &s, bpm);
 
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.fg_dim()))

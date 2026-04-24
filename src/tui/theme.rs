@@ -83,6 +83,14 @@ impl Theme {
         palette: Palette::NIGHT_CITY,
         vu_pulse_hz: 1.2,
     };
+
+    /// The single theme the app currently uses. One call-site to
+    /// change when we ship alternate palettes — widgets don't
+    /// reference a specific const.
+    #[inline]
+    pub fn current() -> Theme {
+        Theme::NIGHT_CITY
+    }
 }
 
 /// Convenience colour helpers used by many widgets.

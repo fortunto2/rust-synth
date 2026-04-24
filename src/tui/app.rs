@@ -450,7 +450,7 @@ fn ui(f: &mut ratatui::Frame, engine: &EngineHandle, app: &AppState) {
         rec_text,
         status_text,
     );
-    let theme = Theme::NIGHT_CITY;
+    let theme = Theme::current();
     let header_style = if engine.recorder.is_recording() {
         Style::default().fg(theme.warn()).add_modifier(Modifier::BOLD)
     } else {
